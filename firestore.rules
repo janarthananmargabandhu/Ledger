@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+
+    // Which ledger a person uses. Only that person can see or change it.
+    match /users/{uid} {
+      allow read, write: if signedIn() && me() == uid;
+    }
+
+    match /ledgers/{id} {
+      // Only members can see who is in a ledger.
+      allow get: if signedIn() && me() in resource.data.members;
+      allow list: if false;
+
+      // Anyone signed in can start a ledger with themselves as the only member.
+      allow create: if signedIn()
+        && request.resource.data.owner == me()
+        && request.resource.data.members == [me()];
+
+      allow update: if signedIn() && (
+        // The owner manages members and the invite switch, but cannot hand over or abandon ownership.
+        (resource.data.owner == me()
+          && request.resource.data.owner == me()
+          && me() in request.resource.data.members
+          && request.resource.data.members.size() <= 10)
+        // Someone with the invite link adds themselves, only while the owner has joining switched on.
+        || (resource.data.inviteOpen == true
+          && !(me() in resource.data.members)
+          && resource.data.members.size() < 10
+          && request.resource.data.members == resource.data.members.concat([me()])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'names']))
+        // A member removes themselves.
+        || (me() in resource.data.members
+          && resource.data.owner != me()
+          && request.resource.data.members == resource.data.members.removeAll([me()])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'names']))
+      );
+      allow delete: if false;
+
+      // Accounts, categories and transactions: members only.
+      match /{path=**} {
+        allow read, write: if signedIn()
+          && me() in get(/databases/$(database)/documents/ledgers/$(id)).data.members;
+      }
+    }
+  }
+}

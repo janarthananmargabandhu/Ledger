@@ -1,0 +1,13 @@
+GROW WITH JANA - files to upload to GitHub
+
+1. On your GitHub repository page click: Add file > Upload files.
+2. Select ALL the files in this folder (Ctrl+A) and drag them into the browser.
+   There are no sub-folders. Files with the same name replace the old ones.
+3. Click "Commit changes".
+4. One file must be created by hand, because it lives in a hidden folder:
+   - Click: Add file > Create new file.
+   - In the name box type exactly:   .github/workflows/deploy.yml
+   - Open deploy-workflow.txt from this folder in Notepad, copy everything,
+     paste it into the big box on GitHub, and click "Commit changes".
+5. Repository Settings > Pages > Source: choose "GitHub Actions".
+6. Open the Actions tab and wait for the green tick.
