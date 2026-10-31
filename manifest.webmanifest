@@ -4,8 +4,8 @@
  "description": "Salary-cycle money tracker with Tamil and English voice entry",
  "start_url": "../",
  "display": "standalone",
- "background_color": "#FFFFFF",
- "theme_color": "#17422F",
+ "background_color": "#F3F3EE",
+ "theme_color": "#0D0E0B",
  "icons": [
   {
    "src": "../icon-192.png",

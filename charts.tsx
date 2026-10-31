@@ -21,21 +21,43 @@ export function HBars({ items, onPick }: { items: Slice[]; onPick?: (id: string)
   );
 }
 
-export function Donut({ items, total }: { items: Slice[]; total: number }) {
-  const R = 52, C = 2 * Math.PI * R;
+/** Donut you can explore: point at or tap a slice (or its key row) to read it in the centre. */
+export function Donut({ items, total, active, onActive }: { items: Slice[]; total: number; active?: number | null; onActive?: (i: number | null) => void }) {
+  const R = 54, C = 2 * Math.PI * R;
   const shown = items.slice(0, PALETTE.length);
   const rest = items.slice(PALETTE.length).reduce((s, i) => s + i.amount, 0);
   const parts = rest > 0 ? [...shown.map(s => s.amount), rest] : shown.map(s => s.amount);
+  const a = active ?? null;
+  const pick = a !== null && a < shown.length ? shown[a] : null;
   let acc = 0;
   return (
-    <svg className="donut" viewBox="0 0 140 140" role="img" aria-label={`Spending by category, total ${fmtMoney(total)}`}>
-      <circle cx="70" cy="70" r={R} fill="none" stroke="var(--line)" strokeWidth="18" />
+    <svg className="donut" viewBox="0 0 140 140" role="img" aria-label={`Spending by category, total ${fmtMoney(total)}`} onMouseLeave={() => onActive?.(null)}>
+      <circle cx="70" cy="70" r={R} fill="none" stroke="var(--soft)" strokeWidth="16" />
       {total > 0 && parts.map((v, i) => {
         const len = (v / total) * C; const off = -acc; acc += len;
-        return <circle key={i} cx="70" cy="70" r={R} fill="none" stroke={colorAt(i)} strokeWidth="18" strokeDasharray={`${Math.max(0, len - 1.2)} ${C}`} strokeDashoffset={off} transform="rotate(-90 70 70)" />;
+        return <circle key={i} className={'donut-seg' + (a !== null && a !== i ? ' dim' : '') + (a === i ? ' on' : '')} cx="70" cy="70" r={R} fill="none" stroke={colorAt(i)} strokeWidth={a === i ? 22 : 16}
+          strokeDasharray={`${Math.max(0, len - 1.6)} ${C}`} strokeDashoffset={off} transform="rotate(-90 70 70)" strokeLinecap="butt"
+          onMouseEnter={() => onActive?.(i)} onClick={() => onActive?.(a === i ? null : i)} />;
       })}
-      <text x="70" y="66" textAnchor="middle" className="donut-label">Spent</text>
-      <text x="70" y="84" textAnchor="middle" className="donut-total">₹{compact(total)}</text>
+      <text x="70" y="62" textAnchor="middle" className="donut-label">{pick ? pick.name : 'Spent'}</text>
+      <text x="70" y="82" textAnchor="middle" className="donut-total">₹{compact(pick ? pick.amount : total)}</text>
+      {pick && <text x="70" y="97" textAnchor="middle" className="donut-label">{pick.pct}%</text>}
+    </svg>
+  );
+}
+
+/** Two rings: outer is money used, inner is time passed. When outer runs ahead of inner, money is going too fast. */
+export function PaceRing({ money, time, size = 148 }: { money: number; time: number; size?: number }) {
+  const r1 = 60, r2 = 46, c1 = 2 * Math.PI * r1, c2 = 2 * Math.PI * r2;
+  const tone = money > time + 0.15 ? 'var(--warn)' : money >= 0.9 ? 'var(--neg)' : 'var(--lime)';
+  return (
+    <svg className="pace-ring" width={size} height={size} viewBox="0 0 140 140" role="img" aria-label={`${Math.round(money * 100)}% of the money used, ${Math.round(time * 100)}% of the cycle passed`}>
+      <circle cx="70" cy="70" r={r1} fill="none" stroke="rgba(255,255,255,.1)" strokeWidth="11" />
+      <circle className="ring-anim" cx="70" cy="70" r={r1} fill="none" stroke={tone} strokeWidth="11" strokeLinecap="round" strokeDasharray={`${Math.max(0.001, money) * c1} ${c1}`} transform="rotate(-90 70 70)" />
+      <circle cx="70" cy="70" r={r2} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="6" />
+      <circle className="ring-anim" cx="70" cy="70" r={r2} fill="none" stroke="rgba(255,255,255,.55)" strokeWidth="6" strokeLinecap="round" strokeDasharray={`${Math.max(0.001, time) * c2} ${c2}`} transform="rotate(-90 70 70)" />
+      <text x="70" y="68" textAnchor="middle" className="ring-big">{Math.round(money * 100)}%</text>
+      <text x="70" y="86" textAnchor="middle" className="ring-small">used</text>
     </svg>
   );
 }

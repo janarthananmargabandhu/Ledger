@@ -8,9 +8,11 @@ export interface AppCtx {
   setFilters: (f: Partial<Filters>) => void;
   go: (p: Page) => void;
   editTx: (t?: Partial<Tx>) => void;
-  quickAdd: () => void;
+  quickAdd: (preset?: Partial<Tx>) => void;
+  voice: () => void;
+  fixSalary: (t: Tx) => void;
   confirm: (o: ConfirmOpts) => void;
-  toast: (s: string) => void;
+  toast: (s: string, undo?: () => void) => void;
 }
 export const Ctx = createContext<AppCtx>(null as any);
 export const useApp = () => useContext(Ctx);
@@ -23,6 +25,14 @@ const PATHS: Record<string, string> = {
   cycles: 'M20 12a8 8 0 1 1-2.6-5.9M20 4v4h-4',
   reports: 'M5 20V10M12 20V4M19 20v-7',
   settings: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4',
+  home: 'M4 11l8-7 8 7v9h-5v-6H9v6H4z',
+  activity: 'M4 6h16M4 12h16M4 18h10',
+  insights: 'M4 20V14M9.5 20V9M15 20v-5M20.5 20V4',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
+  search: 'M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM20 20l-4-4',
+  filter: 'M4 6h16M7 12h10M10 18h4',
+  arrow: 'M5 12h14M13 6l6 6-6 6',
+  mic: 'M9 6a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0zM5 11a7 7 0 0 0 14 0M12 18v3',
   plus: 'M12 5v14M5 12h14',
   edit: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
   trash: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13',
@@ -33,6 +43,22 @@ const PATHS: Record<string, string> = {
 export const Icon = ({ name, size = 18 }: { name: string; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={PATHS[name]} /></svg>
 );
+
+/** Animates a number from its previous value to the new one. */
+export function useCountUp(target: number, ms = 650): number {
+  const [v, setV] = useState(target);
+  const from = useRef(target);
+  useEffect(() => {
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const start = from.current; from.current = target;
+    if (reduce || start === target) { setV(target); return; }
+    let raf = 0; const t0 = performance.now();
+    const tick = (t: number) => { const k = Math.min(1, (t - t0) / ms); const e = 1 - Math.pow(1 - k, 3); setV(start + (target - start) * e); if (k < 1) raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, ms]);
+  return v;
+}
 
 export const Money = ({ n, signed = false, plain = false }: { n: number; signed?: boolean; plain?: boolean }) => (
   <span className={'num' + (plain ? '' : n < 0 ? ' neg' : signed && n > 0 ? ' pos' : '')}>{fmtMoney(n, signed)}</span>

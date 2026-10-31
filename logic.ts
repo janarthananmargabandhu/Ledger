@@ -155,7 +155,7 @@ export function resolvePeriod(p: Period, book: Book, now = today()): Range {
     ({ from: key + '-01', to: monthEnd(key + '-01'), label: fmtMonth(key), title, open: false, monthKey: key });
   const cur = currentCycleIndex(cycles, now);
   switch (p.kind) {
-    case 'currentCycle': return cyc(cur, 'Current salary cycle');
+    case 'currentCycle': return cycles.length ? cyc(cur, 'Current salary cycle') : { from: MIN, to: MAX, label: 'Everything recorded', title: 'All time, no salary recorded yet', open: true };
     case 'previousCycle': return cyc(cur - 1, 'Previous salary cycle');
     case 'cycle': { const i = cycles.findIndex(c => c.start === p.key); return cyc(i, i === cur ? 'Current salary cycle' : 'Salary cycle'); }
     case 'currentMonth': return month(now.slice(0, 7), 'Current month');
@@ -299,6 +299,8 @@ export function buildInsights(book: Book, f: Filters, r: Range, now = today()): 
       if (worst && cats.length > 1) out.push({ tone: 'warn', text: `${worst.name} is up the most: ${fmtMoney(worst.diff)} more than ${at}. Look here first if you want to cut back.` });
     }
   }
+  const ds = dailyStats(txs, r, now);
+  if (ds && ds.days > 1) out.push({ tone: 'neutral', text: `You spend about ${fmtMoney(Math.round(ds.avg))} a day on average ${where}, and a usual day costs ${fmtMoney(Math.round(ds.median))}.` });
   const big = txs.filter(x => x.type === 'expense').sort((a, b) => b.amount - a.amount)[0];
   if (big && t.expenses > 0 && txs.filter(x => x.type === 'expense').length > 2) {
     out.push({ tone: 'neutral', text: `Your largest single expense was ${big.description || catOf(book, big.categoryId).name} on ${fmtDate(big.date)}: ${fmtMoney(big.amount)}.` });
@@ -372,3 +374,219 @@ export function buildPace(book: Book, now = today()): Pace[] {
 export const memberName = (book: Book, id?: string) => (book.members || []).find(m => m.id === id)?.name || '';
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+// ---------- Cycle status: the numbers behind the Home screen ----------
+export interface CycleStatus {
+  start: string; day: number; len: number; daysLeft: number; nextSalary: string;
+  income: number; expenses: number; savings: number; spendable: number; left: number; perDay: number;
+  spentShare: number; timeShare: number; todaySpent: number; usual: number | null;
+}
+/** Where the current salary cycle stands today. Null until a salary has been recorded. */
+export function cycleStatus(book: Book, now = today()): CycleStatus | null {
+  const cycles = getCycles(book);
+  const i = currentCycleIndex(cycles, now);
+  const c = cycles[i];
+  if (!c || c.end) return null;
+  const t = totals(book.txs.filter(x => x.date >= c.start && x.date <= now));
+  const closed = cycles.slice(0, i).map(x => daysBetween(x.start, x.end!) + 1);
+  const len = Math.max(7, closed.length ? Math.round(closed.reduce((a, b) => a + b, 0) / closed.length) : 30);
+  const day = daysBetween(c.start, now) + 1;
+  const daysLeft = Math.max(1, len - day + 1);
+  const spendable = t.income - t.savings;
+  const left = spendable - t.expenses;
+  return {
+    start: c.start, day, len, daysLeft, nextSalary: addDays(c.start, len),
+    income: t.income, expenses: t.expenses, savings: t.savings, spendable, left,
+    perDay: left > 0 ? Math.floor(left / daysLeft) : 0,
+    spentShare: spendable > 0 ? Math.min(1, t.expenses / spendable) : 0,
+    timeShare: Math.min(1, day / len),
+    todaySpent: book.txs.reduce((s, x) => (x.type === 'expense' && x.date === now ? s + x.amount : s), 0),
+    usual: usualDay(book, now),
+  };
+}
+
+// ---------- Quick picks: the expenses you log again and again ----------
+export interface QuickPick { description: string; categoryId: string; amount: number; accountId: string; count: number; }
+/** Most frequent expense descriptions of the last 60 days, with their usual amount and account. */
+export function quickPicks(book: Book, max = 8, now = today()): QuickPick[] {
+  const from = addDays(now, -60);
+  const m = new Map<string, { d: string; cat: string; amounts: number[]; acc: string; count: number; last: number }>();
+  for (const t of sortAsc(book.txs)) {
+    if (t.type !== 'expense' || t.date < from || !t.description.trim()) continue;
+    const k = t.description.trim().toLowerCase();
+    const e = m.get(k) || { d: t.description.trim(), cat: t.categoryId, amounts: [], acc: t.accountId, count: 0, last: 0 };
+    e.amounts.push(t.amount); e.cat = t.categoryId; e.acc = t.accountId; e.count++; e.last = t.createdAt; m.set(k, e);
+  }
+  return [...m.values()]
+    .sort((a, b) => b.count - a.count || b.last - a.last)
+    .slice(0, max)
+    .map(e => { const s = [...e.amounts].sort((a, b) => a - b); return { description: e.d, categoryId: e.cat, amount: s[Math.floor(s.length / 2)], accountId: e.acc, count: e.count }; });
+}
+
+// ---------- Salary repair: turn an entry into the salary, and pull early expenses into the cycle ----------
+/** Large entries that might really be a salary recorded the wrong way (last 60 days, not already salary). */
+export function salaryCandidates(book: Book, now = today()): Tx[] {
+  const from = addDays(now, -60);
+  return book.txs.filter(t => t.date >= from && !isSalary(t) && t.type !== 'transfer' && (t.type === 'income' || t.amount >= 5000))
+    .sort((a, b) => (a.type === 'income' ? 0 : 1) - (b.type === 'income' ? 0 : 1) || b.amount - a.amount).slice(0, 4);
+}
+/** Expenses dated before the first salary (within 31 days of it) that no cycle covers. */
+export function earlyExpenses(book: Book, salaryDate?: string): { from: string; count: number; total: number } | null {
+  const first = salaryDate || getCycles(book)[0]?.start;
+  if (!first) return null;
+  const prevSalary = book.txs.filter(t => isSalary(t) && t.date < first).map(t => t.date).sort().pop();
+  const floor = prevSalary && prevSalary > addDays(first, -31) ? addDays(prevSalary, 1) : addDays(first, -31);
+  if (prevSalary && getCycles(book).some(c => c.start === prevSalary)) return null;
+  const early = book.txs.filter(t => t.type === 'expense' && t.date < first && t.date >= floor);
+  if (!early.length) return null;
+  return { from: early.map(t => t.date).sort()[0], count: early.length, total: early.reduce((s, t) => s + t.amount, 0) };
+}
+
+// ---------- Sparks: short, true, encouraging reads of your own numbers ----------
+export interface Spark { emoji: string; kicker: string; big: string; text: string; tone: 'lime' | 'sky' | 'sun' | 'rose' | 'mint' | 'dawn' | 'night'; weight: number; kind?: 'stat' | 'fact' | 'quote'; }
+// Original lines written for this app, so they can be shown freely.
+export const QUOTES = [
+  'Small entries, big clarity. Every rupee you log is a decision you get to make on purpose.',
+  'You are not tracking money. You are building the habit that grows it.',
+  'Payday is a fresh page. How this cycle ends is still being written, by you.',
+  'Wealth is mostly quiet days. A light day today is a gift to next month.',
+  'Knowing where it went is the first step to choosing where it goes.',
+  'Consistency beats intensity. Open, log, close. That is the whole trick.',
+  'Every saved rupee is future freedom, paid in advance.',
+  'You do not need a perfect month. You need a slightly better one.',
+  'The goal is not to spend nothing. It is to spend on what matters to you.',
+  'Progress, not pressure. Look how far your numbers have come.',
+  'Good morning. Today is a new chance to spend with intention and save with pride.',
+  'A seed does not grow in a day, and neither does wealth. Water it daily.',
+  'The best time to start saving was yesterday. The next best time is this morning.',
+  'Rich is a feeling of enough. Grow the enough, and the feeling follows.',
+  'Your future self is watching today\'s choices. Make them proud.',
+  'Discipline is just remembering what you want most.',
+  'Money is a tool. Today, you decide what it builds.',
+  'Tiny savings, repeated, become a mountain you can stand on.',
+  'Do not wait to feel rich to act wisely. Act wisely and you will feel rich.',
+  'Every bill paid on time is a promise kept to yourself.',
+  'Calm money is a gift you give your whole family.',
+  'One mindful choice today is worth more than a perfect plan for tomorrow.',
+  'Spend like a gardener: plant first, harvest later.',
+  'Clarity is a superpower. You have it in your pocket.',
+  'Earn with energy. Spend with thought. Save with joy.',
+  'This morning, choose one thing you will not spend on, and one dream you will fund.',
+  'Grow slow, grow steady, grow with purpose.',
+  'Your salary is not your wealth. What you keep is.',
+  'Abundance starts with attention.',
+  'Rise, log, thrive. Let\'s make today count.',
+];
+const lakh = (n: number) => (n >= 1e5 ? `₹${(n / 1e5).toFixed(1)} lakh` : fmtMoney(Math.round(n)));
+/** General facts: arithmetic and well-settled history only. */
+export const FACTS: { emoji: string; kicker: string; big: string; text: string }[] = [
+  { emoji: '⏳', kicker: 'The rule of 72', big: '72 ÷ rate', text: 'Divide 72 by a yearly return to see how many years money takes to double. At 8% a year it doubles in about 9 years.' },
+  { emoji: '☕', kicker: 'Small spends add up', big: '₹100 a day', text: 'Saving ₹100 a day puts away ₹36,500 in a year, before any interest.' },
+  { emoji: '📈', kicker: 'The magic of compounding', big: '₹1,000 a month', text: `Invested every month for 20 years at 10% a year, it can grow to about ${lakh(1000 * ((Math.pow(1 + 0.1 / 12, 240) - 1) / (0.1 / 12)))}. You would have put in only ₹2.4 lakh.` },
+  { emoji: '🎈', kicker: 'Inflation, quietly', big: '12 years', text: 'At 6% inflation, prices double in about 12 years. Money kept idle loses half its buying power in that time.' },
+  { emoji: '🏛️', kicker: 'India money history', big: '1935', text: 'The Reserve Bank of India was set up on 1 April 1935. It issues India\'s currency notes.' },
+  { emoji: '₹', kicker: 'The rupee sign', big: '2010', text: 'India adopted the ₹ symbol in 2010, making the rupee one of the few currencies with its own sign.' },
+  { emoji: '🪙', kicker: 'Paise went decimal', big: '1957', text: 'Before 1957, a rupee was 16 annas or 64 pice. Since 1 April 1957 it has been 100 paise.' },
+  { emoji: '📱', kicker: 'UPI is young', big: '2016', text: 'UPI launched in 2016. In a few years it changed how India pays for everything from tea to rent.' },
+  { emoji: '📜', kicker: 'Paper money began in China', big: '~1,000 years', text: 'The first widely used paper money appeared in China about a thousand years ago, during the Song dynasty.' },
+  { emoji: '🧮', kicker: 'The 50-30-20 idea', big: '50 · 30 · 20', text: 'A simple budget split: about half of income for needs, 30% for wants, 20% for savings. Adjust it to your life.' },
+  { emoji: '🛟', kicker: 'Emergency fund', big: '3 to 6 months', text: 'A common guideline is to keep three to six months of expenses aside for surprises, so a bad month never becomes debt.' },
+  { emoji: '🎯', kicker: 'Pay yourself first', big: 'Save first', text: 'Moving savings out on payday, before spending begins, is one of the simplest habits that reliably builds wealth.' },
+  { emoji: '💳', kicker: 'Credit card interest', big: '~3% a month', text: 'Unpaid card balances often cost around 3% a month, which is over 40% a year. Paying the full bill avoids it entirely.' },
+  { emoji: '🧾', kicker: '₹20 twice a day', big: '₹14,600 a year', text: 'Two ₹20 spends every day add up to ₹14,600 a year. Small habits are big numbers in disguise.' },
+];
+const ENCOURAGE = QUOTES;
+const daySpendOf = (book: Book, d: string) => book.txs.reduce((s, t) => (t.type === 'expense' && t.date === d ? s + t.amount : s), 0);
+export function buildSparks(book: Book, now = today()): Spark[] {
+  const out: Spark[] = [];
+  const cycles = getCycles(book);
+  const ci = currentCycleIndex(cycles, now);
+  const c = cycles[ci];
+  // Logging streak: consecutive days, ending today or yesterday, with at least one entry.
+  const logged = new Set(book.txs.map(t => t.date));
+  let streak = 0;
+  for (let d = logged.has(now) ? now : addDays(now, -1); logged.has(d) && streak < 400; d = addDays(d, -1)) streak++;
+  if (streak >= 3) out.push({ emoji: '🔥', kicker: 'Logging streak', big: `${streak} days`, text: `You have recorded something every day for ${streak} days. That habit is what makes every other number here honest.`, tone: 'sun', weight: Math.min(9, 3 + streak / 3) });
+  // Light-day streak against your usual day.
+  let light = 0;
+  for (let d = addDays(now, -1); light < 60; d = addDays(d, -1)) { const u = usualDay(book, d); if (!u || daySpendOf(book, d) > u * 0.6) break; light++; }
+  if (light >= 2) out.push({ emoji: '🌱', kicker: 'Light days in a row', big: `${light}`, text: `${light} days in a row below your usual spend. Keep it to one more and the streak grows.`, tone: 'mint', weight: 6 + light });
+  if (c) {
+    const txs = book.txs.filter(t => t.date >= c.start && t.date <= now);
+    const t = totals(txs);
+    const day = daysBetween(c.start, now) + 1;
+    const noSpend = Array.from({ length: day }, (_, k) => addDays(c.start, k)).filter(d => d <= now && d < now && daySpendOf(book, d) === 0).length;
+    if (noSpend >= 1) out.push({ emoji: '🛡️', kicker: 'No-spend days this cycle', big: `${noSpend}`, text: `${noSpend} full day${noSpend === 1 ? '' : 's'} this cycle without spending a rupee. Those days quietly fund your goals.`, tone: 'sky', weight: 4 + noSpend });
+    if (t.income > 0 && t.savings > 0) {
+      const rate = pct(t.savings, t.income);
+      out.push({ emoji: '💰', kicker: 'Saved this cycle', big: fmtMoney(t.savings), text: `That is ${rate}% of this cycle's income set aside first. At this rate that is about ${fmtMoney(t.savings * 12)} in a year.`, tone: 'lime', weight: 5 + rate / 10 });
+    }
+    const spendable = t.income - t.savings;
+    if (!c.end && spendable > 0 && t.expenses > 0) {
+      const closed = cycles.slice(0, ci).map(x => daysBetween(x.start, x.end!) + 1);
+      const len = Math.max(7, closed.length ? Math.round(closed.reduce((a, b) => a + b, 0) / closed.length) : 30);
+      const ahead = Math.round(spendable * Math.min(1, day / len) - t.expenses);
+      if (ahead > 0) out.push({ emoji: '🚀', kicker: 'Ahead of pace', big: fmtMoney(ahead), text: `You have spent ${fmtMoney(ahead)} less than an even pace would by day ${day}. That is room you have earned.`, tone: 'lime', weight: 7 });
+    }
+    // Wins against the same point of the previous cycle.
+    const prev = cycles[ci - 1];
+    if (prev) {
+      const cut = addDays(prev.start, day - 1);
+      const pTxs = book.txs.filter(x => x.date >= prev.start && x.date <= (cut < (prev.end || cut) ? cut : prev.end!));
+      const pt = totals(pTxs);
+      const diff = pt.expenses - t.expenses;
+      if (pt.expenses > 0 && diff > 0) out.push({ emoji: '📉', kicker: 'Better than last cycle', big: fmtMoney(diff), text: `Less spent than at the same point of your previous cycle (${fmtMoney(pt.expenses)} by day ${day}).`, tone: 'mint', weight: 8 });
+      const pc = new Map(spendByCategory(pTxs, book).map(x => [x.id, x.amount]));
+      let best: { name: string; icon: string; d: number } | null = null;
+      for (const [id, amt] of pc) { const now2 = spendByCategory(txs, book).find(x => x.id === id)?.amount || 0; const d = amt - now2; if (d > 0 && (!best || d > best.d)) { const cc = catOf(book, id); best = { name: cc.name, icon: cc.icon, d }; } }
+      if (best && best.d >= 100) out.push({ emoji: best.icon, kicker: `${best.name} is down`, big: fmtMoney(best.d), text: `${fmtMoney(best.d)} less on ${best.name} than at this point last cycle. Whatever you changed, it is working.`, tone: 'sky', weight: 6 });
+    }
+  }
+  const savedAll = book.txs.reduce((s, t) => (t.type === 'savings' ? s + t.amount : s), 0);
+  if (savedAll > 0) out.push({ emoji: '🏦', kicker: 'Saved since you started', big: fmtMoney(savedAll), text: `Every savings entry adds up. This is money you chose to keep for your future self.`, tone: 'rose', weight: 4 });
+  // A fact from your own spending: what a frequent small habit costs over a year.
+  const habit = quickPicks(book, 6, now).filter(p => p.count >= 4 && p.amount <= 500)[0];
+  if (habit) { const yr = Math.round(habit.amount * habit.count * (365 / 60) / 10) * 10; out.push({ kind: 'fact', emoji: catOf(book, habit.categoryId).icon, kicker: `Your ${habit.description} habit`, big: `${fmtMoney(yr)} a year`, text: `About ${habit.count} times in the last 60 days at ${fmtMoney(habit.amount)}. Worth it? Your call. Knowing the number is the power.`, tone: 'sky', weight: 5 }); }
+  return out;
+}
+
+/** A random pick from a list, different each time the app opens. */
+export const pickRandom = <T,>(list: T[], n: number): T[] => { const a = [...list]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a.slice(0, n); };
+export const factSpark = (f: typeof FACTS[number]): Spark => ({ ...f, kind: 'fact', tone: 'rose', weight: 3 });
+export const quoteSpark = (morning: boolean): Spark => ({ kind: 'quote', emoji: morning ? '🌅' : '✨', kicker: morning ? 'Morning thought' : 'Thought for now', big: '', text: pickRandom(QUOTES, 1)[0], tone: morning ? 'dawn' : 'night', weight: 10 });
+
+// ---------- Daily average: how much a typical day costs in a period ----------
+/** Single payments this size or more (rent, family support, big purchases) are left out of the everyday average. */
+export const BIG_PAYMENT = 2000;
+export interface DailyStats {
+  days: number; total: number; avg: number; median: number; noSpend: number; everydayAvg: number; bigCount: number; bigTotal: number;
+  top: { date: string; amount: number } | null;
+  byDow: number[]; weekdayAvg: number; weekendAvg: number; from: string; to: string;
+}
+/** Expenses only. Counts every calendar day in the period up to today, including days with no spending. */
+export function dailyStats(txs: Tx[], r: Range, now = today()): DailyStats | null {
+  const exp = txs.filter(t => t.type === 'expense');
+  if (r.empty || !exp.length) return null;
+  const dates = exp.map(t => t.date).sort();
+  const from = r.from.startsWith('0000') ? dates[0] : r.from;
+  const end = r.to.startsWith('9999') || r.to > now ? (dates[dates.length - 1] > now ? dates[dates.length - 1] : now) : r.to;
+  if (from > end) return null;
+  const per = new Map<string, number>();
+  for (const t of exp) if (t.date >= from && t.date <= end) per.set(t.date, (per.get(t.date) || 0) + t.amount);
+  const all: { date: string; amount: number }[] = [];
+  for (let d = from; d <= end && all.length < 3700; d = addDays(d, 1)) all.push({ date: d, amount: per.get(d) || 0 });
+  const total = all.reduce((s, x) => s + x.amount, 0);
+  const sorted = all.map(x => x.amount).sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  const dowSum = [0, 0, 0, 0, 0, 0, 0], dowN = [0, 0, 0, 0, 0, 0, 0];
+  for (const x of all) { const w = parse(x.date).getDay(); dowSum[w] += x.amount; dowN[w]++; }
+  const byDow = dowSum.map((s, i) => (dowN[i] ? s / dowN[i] : 0));
+  const wk = all.filter(x => { const w = parse(x.date).getDay(); return w > 0 && w < 6; });
+  const we = all.filter(x => { const w = parse(x.date).getDay(); return w === 0 || w === 6; });
+  const avgOf = (a: { amount: number }[]) => (a.length ? a.reduce((s, x) => s + x.amount, 0) / a.length : 0);
+  const top = all.reduce<{ date: string; amount: number } | null>((m, x) => (x.amount > (m?.amount || 0) ? x : m), null);
+  const big = exp.filter(t => t.date >= from && t.date <= end && t.amount >= BIG_PAYMENT);
+  const bigTotal = big.reduce((s2, t) => s2 + t.amount, 0);
+  return { everydayAvg: (total - bigTotal) / all.length, bigCount: big.length, bigTotal, days: all.length, total, avg: total / all.length, median, noSpend: all.filter(x => x.amount === 0).length, top, byDow, weekdayAvg: avgOf(wk), weekendAvg: avgOf(we), from, to: end };
+}

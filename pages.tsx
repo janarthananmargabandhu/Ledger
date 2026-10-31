@@ -2,12 +2,12 @@ import React, { useMemo, useState } from 'react';
 import {
   Account, Book, Gran, METHODS, Range, SALARY, OTHER, TYPES, Tx, accOf, addDays, applyFilters, buildInsights, catOf, computeBalances, currentCycleIndex,
   cycleLabel, daysBetween, buildPace, memberName, effect, fmtDate, fmtMoney, fmtMonth, getCycles, makeBuckets, monthEnd, monthKeys, pct, signedAmount, sortAsc, spendByAccount,
-  spendByCategory, sumIn, today, totals,
+  spendByCategory, sumIn, today, totals, cycleStatus, quickPicks, salaryCandidates, earlyExpenses, buildSparks, Spark, isSalary, FACTS, factSpark, pickRandom, quoteSpark, dailyStats, previousRange, BIG_PAYMENT,
 } from './logic';
 import { store, normalise } from './store';
 import { emptyBook, sampleBook } from './sample';
-import { BarChart, Donut, HBars, colorAt, Series } from './charts';
-import { Empty, Field, FilterBar, Icon, Money, Panel, PeriodSelect, PeriodStepper, useApp } from './ui';
+import { BarChart, Donut, HBars, PaceRing, colorAt } from './charts';
+import { Empty, Field, FilterBar, Icon, Money, Panel, PeriodSelect, PeriodStepper, useApp, useCountUp } from './ui';
 import { AccountForm, CategoryForm } from './forms';
 
 const typeLabel = (t: Tx) => TYPES.find(x => x.id === t.type)!.label;
@@ -21,7 +21,7 @@ export function TxTable({ txs, limit, compact }: { txs: Tx[]; limit?: number; co
   const family = (book.members || []).length > 1;
   const del = (t: Tx) => confirm({
     title: 'Delete this transaction?', body: `${t.description}, ${fmtMoney(Math.abs(t.amount))} on ${fmtDate(t.date, true)}. Balances will be recalculated.`, action: 'Delete transaction', danger: true,
-    run: () => { const b = store.get(); store.set({ ...b, txs: b.txs.filter(x => x.id !== t.id) }); toast('Transaction deleted'); },
+    run: () => { const b = store.get(); store.set({ ...b, txs: b.txs.filter(x => x.id !== t.id) }); toast('Transaction deleted', () => { const c = store.get(); store.set({ ...c, txs: [...c.txs, t] }); }); },
   });
   if (!rows.length) return <Empty title="No transactions here" body="Nothing matches this period and these filters. Change the filters, or add a transaction." action={<button className="btn" onClick={() => editTx()}>Add transaction</button>} />;
   return (
@@ -85,47 +85,219 @@ export function Sheet({ account, range, actions }: { account: Account; range: Ra
   );
 }
 
-// ---------- Dashboard ----------
-function TrendPanel({ txs }: { txs: Tx[] }) {
-  const { book, range } = useApp();
-  const [gran, setGran] = useState<Gran>('day');
-  const [compare, setCompare] = useState<string[]>([]);
-  const spend = txs.filter(t => t.type === 'expense');
-  const buckets = makeBuckets(range, gran, book, spend);
-  const cats = spendByCategory(spend, book);
-  const picked = compare.filter(id => cats.some(c => c.id === id));
-  const series: Series[] = picked.length
-    ? picked.map(id => ({ name: catOf(book, id).name, color: colorAt(cats.findIndex(c => c.id === id)), values: buckets.map(b => sumIn(spend, b, t => t.categoryId === id)) }))
-    : [{ name: 'Spending', color: 'var(--accent)', values: buckets.map(b => sumIn(spend, b, () => true)) }];
-  const toggle = (id: string) => setCompare(c => (c.includes(id) ? c.filter(x => x !== id) : [...c, id].slice(-4)));
+// ---------- Activity list: transactions grouped by day ----------
+const dayTitle = (d: string) => { const n = today(); return d === n ? 'Today' : d === addDays(n, -1) ? 'Yesterday' : fmtDate(d, d.slice(0, 4) !== n.slice(0, 4)); };
+export function ActivityList({ txs, limit }: { txs: Tx[]; limit?: number }) {
+  const { book, filters, editTx, confirm, toast } = useApp();
+  const [shown, setShown] = useState(limit || 60);
+  const all = useMemo(() => sortAsc(txs).reverse(), [txs]);
+  const rows = all.slice(0, shown);
+  const view = filters.accountId !== 'all' ? filters.accountId : undefined;
+  const family = (book.members || []).length > 1;
+  const catIdx = useMemo(() => { const m: Record<string, number> = {}; spendByCategory(book.txs, book).forEach((c, i) => { m[c.id] = i; }); return m; }, [book]);
+  const del = (t: Tx) => confirm({
+    title: 'Delete this transaction?', body: `${t.description}, ${fmtMoney(Math.abs(t.amount))} on ${fmtDate(t.date, true)}. Balances will be recalculated.`, action: 'Delete transaction', danger: true,
+    run: () => { const b = store.get(); store.set({ ...b, txs: b.txs.filter(x => x.id !== t.id) }); toast('Transaction deleted', () => { const c = store.get(); store.set({ ...c, txs: [...c.txs, t] }); }); },
+  });
+  if (!rows.length) return <Empty title="Nothing here yet" body="No transactions match this period and these filters." action={<button className="btn" onClick={() => editTx()}>Add transaction</button>} />;
+  const groups: { date: string; items: Tx[] }[] = [];
+  for (const t of rows) { const g = groups[groups.length - 1]; if (g && g.date === t.date) g.items.push(t); else groups.push({ date: t.date, items: [t] }); }
   return (
-    <Panel title="Spending trend" note={picked.length ? 'Comparing the selected categories' : 'All expenses. Pick categories below to compare them.'}
-      right={<div className="seg" role="group" aria-label="Group by">{(['day', 'week', 'month', 'cycle'] as Gran[]).map(g => <button key={g} className={gran === g ? 'on' : ''} onClick={() => setGran(g)}>{g === 'day' ? 'Daily' : g === 'week' ? 'Weekly' : g === 'month' ? 'Monthly' : 'Salary cycle'}</button>)}</div>}>
-      {spend.length && buckets.length ? <>
-        <BarChart labels={buckets.map(b => b.label)} series={series} />
-        <div className="chips">{cats.slice(0, 8).map((c, i) => <button key={c.id} className={'chip' + (picked.includes(c.id) ? ' on' : '')} onClick={() => toggle(c.id)}><i style={{ background: colorAt(i) }} />{c.name}</button>)}</div>
-      </> : <Empty title="No spending to chart" body="Expenses in this period will appear here as you record them." />}
-    </Panel>
+    <div className="activity">
+      {groups.map(g => {
+        const out = g.items.reduce((s, t) => (t.type === 'expense' ? s + t.amount : s), 0);
+        return (
+          <section key={g.date} className="day">
+            <header className="day-head"><span>{dayTitle(g.date)}</span>{out > 0 && <span className="num">{fmtMoney(out)} spent</span>}</header>
+            <ul>{g.items.map(t => {
+              const c = catOf(book, t.categoryId);
+              const amt = signedAmount(t, view);
+              const acct = t.type === 'transfer' ? `${accOf(book, t.accountId)?.name || '?'} → ${accOf(book, t.toAccountId)?.name || '?'}` : accOf(book, t.accountId)?.name || 'Deleted account';
+              const tint = t.type === 'income' ? 'var(--pos)' : t.type === 'savings' ? 'var(--c2)' : t.type === 'transfer' ? 'var(--muted)' : colorAt(catIdx[t.categoryId] ?? 7);
+              return (
+                <li key={t.id} className="act">
+                  <button className="act-main" onClick={() => editTx(t)} aria-label={`Edit ${t.description}`}>
+                    <span className="act-icon" style={{ ['--tint' as any]: tint }}>{c.icon}</span>
+                    <span className="act-text"><b>{t.description}</b><small>{[t.type === 'expense' ? c.name : typeLabel(t), acct, family ? memberName(book, t.by) : '', t.notes].filter(Boolean).join(' · ')}</small></span>
+                    <span className={'act-amt num' + (amt > 0 ? ' pos' : '')}>{amt > 0 ? '+' : ''}{fmtMoney(Math.abs(amt))}</span>
+                  </button>
+                  <button className="icon-btn act-del" onClick={() => del(t)} aria-label={`Delete ${t.description}`}><Icon name="trash" size={16} /></button>
+                </li>);
+            })}</ul>
+          </section>);
+      })}
+      {all.length > rows.length && !limit && <button className="btn wide-btn" onClick={() => setShown(s => s + 100)}>Show {Math.min(100, all.length - rows.length)} more</button>}
+    </div>
+  );
+}
+
+// ---------- Home ----------
+function Hero() {
+  const { book, bal, editTx, fixSalary } = useApp();
+  const cs = cycleStatus(book);
+  const left = useCountUp(cs ? cs.left : bal.total);
+  if (!cs) {
+    const cands = salaryCandidates(book);
+    return (
+      <section className="card hero">
+        <div className="hero-main">
+          <p className="eyebrow">Balance across all accounts</p>
+          <p className="hero-num num">{fmtMoney(Math.round(left))}</p>
+          {cands.length > 0 ? <>
+            <p className="hero-sub">No salary recorded yet. If you already entered it another way, tap it to make it your salary.</p>
+            <div className="hero-cands">{cands.map(t => <button key={t.id} className="cand" onClick={() => fixSalary(t)}><span><b>{t.description}</b><small>{fmtDate(t.date)} · {t.type === 'income' ? catOf(book, t.categoryId).name : `recorded as ${t.type}`}</small></span><b className="num">{fmtMoney(Math.abs(t.amount))}</b><em>This was my salary</em></button>)}</div>
+            <button className="link" onClick={() => editTx({ type: 'income', categoryId: SALARY, description: 'Salary' })}>Or record a new salary</button>
+          </> : <>
+            <p className="hero-sub">Record your salary and the app starts tracking how much is left until the next one.</p>
+            <button className="btn primary" onClick={() => editTx({ type: 'income', categoryId: SALARY, description: 'Salary' })}>Record salary</button>
+          </>}
+        </div>
+      </section>
+    );
+  }
+  const early = getCycles(book).length === 1 ? earlyExpenses(book) : null;
+  const salaryTx = early ? book.txs.find(t => isSalary(t) && t.date === cs.start) : undefined;
+  const fast = cs.spentShare > cs.timeShare + 0.15;
+  return (
+    <section className="card hero">
+      <div className="hero-main">
+        <p className="eyebrow">Left to spend this salary cycle</p>
+        <p className={'hero-num num' + (cs.left < 0 ? ' over' : '')}>{fmtMoney(Math.round(left))}</p>
+        <p className="hero-sub">{cs.left > 0
+          ? <>About <b className="num">{fmtMoney(cs.perDay)}</b> a day for the next {cs.daysLeft} day{cs.daysLeft === 1 ? '' : 's'}. Next salary expected around {fmtDate(cs.nextSalary)}.</>
+          : <>This cycle's income is used up. Anything more comes out of older balances.</>}</p>
+        {early && salaryTx && <button className="hero-fix" onClick={() => fixSalary(salaryTx)}>{early.count} expense{early.count === 1 ? '' : 's'} ({fmtMoney(early.total)}) from before {fmtDate(cs.start)} are not in this cycle. <b>Count them</b></button>}
+        <div className="hero-stats">
+          <div><span>Income</span><b className="num">{fmtMoney(cs.income)}</b></div>
+          <div><span>Spent</span><b className="num">{fmtMoney(cs.expenses)}</b></div>
+          <div><span>Saved</span><b className="num">{fmtMoney(cs.savings)}</b></div>
+        </div>
+      </div>
+      <div className="hero-ring">
+        <PaceRing money={cs.spentShare} time={cs.timeShare} />
+        <p className="ring-key"><span><i className={'k-money' + (fast ? ' fast' : '')} />Money used</span><span><i className="k-time" />Day {cs.day} of ~{cs.len}</span></p>
+      </div>
+    </section>
+  );
+}
+
+const GREET = () => { const h = new Date().getHours(); return h < 5 ? 'Still up' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
+function Sparks() {
+  const { book } = useApp();
+  const session = React.useSyncExternalStore(store.subscribe, store.session, store.session);
+  // A fresh order every time the app opens: the strongest few, shuffled, with a thought for the day at the end.
+  const sparks = useMemo(() => {
+    // Fresh every open: your strongest wins, a money fact or two, and a quote. Mornings open with the quote.
+    const h = new Date().getHours(); const morning = h >= 5 && h < 12;
+    const all = buildSparks(book);
+    const stats = pickRandom(all.filter(x => x.kind !== 'fact').sort((a, b) => b.weight - a.weight).slice(0, 5), 4);
+    const facts = [...all.filter(x => x.kind === 'fact'), ...pickRandom(FACTS, 2).map(factSpark)].slice(0, 2);
+    const mixed: Spark[] = [];
+    stats.forEach((x, k) => { mixed.push(x); if (k % 2 === 1 && facts.length) mixed.push(facts.shift()!); });
+    mixed.push(...facts);
+    const q = quoteSpark(morning);
+    return morning ? [q, ...mixed] : [...mixed.slice(0, 2), q, ...mixed.slice(2)];
+  }, [book.txs.length]); // eslint-disable-line
+  const [i, setI] = useState(0);
+  const track = React.useRef<HTMLDivElement>(null);
+  const paused = React.useRef(false);
+  React.useEffect(() => {
+    const t = window.setInterval(() => { if (paused.current || !track.current) return; const n = (Math.round(track.current.scrollLeft / track.current.clientWidth) + 1) % sparks.length; track.current.scrollTo({ left: n * track.current.clientWidth, behavior: 'smooth' }); }, 6000);
+    return () => window.clearInterval(t);
+  }, [sparks.length]);
+  const name = (session.name || '').split(' ')[0];
+  if (!sparks.length) return null;
+  return (
+    <section className="sparks" aria-label="Your wins" onPointerDown={() => { paused.current = true; }} onMouseEnter={() => { paused.current = true; }} onMouseLeave={() => { paused.current = false; }}>
+      <p className="greet">{GREET()}{name ? `, ${name}` : ''} <span className="wave">👋</span></p>
+      <div className="spark-track" ref={track} onScroll={e => { const el = e.currentTarget; setI(Math.round(el.scrollLeft / el.clientWidth)); }}>
+        {sparks.map((sp: Spark, k) => (
+          <article key={k} className={'spark ' + sp.tone}>
+            <span className="spark-emoji" aria-hidden="true">{sp.emoji}</span>
+            <div className="spark-body">
+              <p className="spark-kicker">{sp.kind === 'fact' ? 'Money fact · ' : ''}{sp.kicker}</p>
+              {sp.kind === 'quote' ? <blockquote className="spark-quote">{sp.text}</blockquote> : <>
+                {sp.big && <p className="spark-big num">{sp.big}</p>}
+                <p className="spark-text">{sp.text}</p></>}
+              {sp.kind === 'quote' && <p className="spark-date">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</p>}
+            </div>
+            <i className="spark-orb" aria-hidden="true" />
+          </article>
+        ))}
+      </div>
+      {sparks.length > 1 && <div className="spark-dots" role="tablist">{sparks.map((_, k) => <button key={k} role="tab" aria-selected={k === i} aria-label={`Insight ${k + 1}`} className={k === i ? 'on' : ''} onClick={() => { paused.current = true; track.current?.scrollTo({ left: k * track.current.clientWidth, behavior: 'smooth' }); }} />)}</div>}
+    </section>
+  );
+}
+
+function TodayCard() {
+  const { book, quickAdd, voice } = useApp();
+  const cs = cycleStatus(book);
+  const spent = book.txs.reduce((s, x) => (x.type === 'expense' && x.date === today() ? s + x.amount : s), 0);
+  const budget = cs && cs.perDay > 0 ? cs.perDay : null;
+  const share = budget ? Math.min(1, spent / budget) : 0;
+  return (
+    <section className="card today">
+      <p className="eyebrow">Today</p>
+      <p className="today-num num">{fmtMoney(spent)}<small>{budget ? ` of ${fmtMoney(budget)}` : ' spent'}</small></p>
+      {budget && <div className="meter" aria-hidden="true"><span style={{ width: `${share * 100}%` }} className={spent > budget ? 'over' : ''} /></div>}
+      <p className="note">{budget ? (spent > budget ? `${fmtMoney(spent - budget)} over today's share. Tomorrow's share shrinks a little.` : `${fmtMoney(budget - spent)} left in today's share.`) : 'Your daily share appears once a salary is recorded.'}</p>
+      <div className="today-actions"><button className="btn primary" onClick={() => quickAdd()}><Icon name="plus" size={16} />Expense</button><button className="btn ghost-line" onClick={voice}><Icon name="mic" size={16} />Speak</button></div>
+    </section>
+  );
+}
+
+function QuickTiles() {
+  const { book, quickAdd } = useApp();
+  const picks = quickPicks(book, 6);
+  if (!picks.length) return null;
+  return (
+    <section className="card tiles-card">
+      <header className="card-head"><h3>Log again in one tap</h3><p className="note">Your most frequent expenses</p></header>
+      <div className="tiles">{picks.map(p => { const c = catOf(book, p.categoryId); return (
+        <button key={p.description} className="tile" onClick={() => quickAdd({ description: p.description, categoryId: p.categoryId, amount: p.amount, accountId: p.accountId })}>
+          <span className="tile-icon">{c.icon}</span><b>{p.description}</b><span className="num">{fmtMoney(p.amount)}</span>
+        </button>); })}</div>
+    </section>
+  );
+}
+
+function AccountsCard() {
+  const { book, bal, go } = useApp();
+  const max = Math.max(1, ...book.accounts.map(a => Math.abs(bal.byAccount[a.id] || 0)));
+  return (
+    <section className="card accts-card">
+      <header className="card-head"><h3>Balance now</h3><button className="link-btn" onClick={() => go('accounts')}>Accounts<Icon name="arrow" size={15} /></button></header>
+      <p className="accts-total num">{fmtMoney(bal.total)}</p>
+      <ul className="accts">{book.accounts.map((a, i) => <li key={a.id}><span>{a.name}</span><span className="num">{fmtMoney(bal.byAccount[a.id] || 0)}</span><i style={{ width: `${(Math.abs(bal.byAccount[a.id] || 0) / max) * 100}%`, background: colorAt(i + 1) }} /></li>)}</ul>
+    </section>
+  );
+}
+
+function WhereItWent() {
+  const { book, filters, range, setFilters, go } = useApp();
+  const [active, setActive] = useState<number | null>(null);
+  const txs = useMemo(() => applyFilters(book, { ...filters, categoryId: 'all' }, range), [book, filters, range]);
+  const cats = spendByCategory(txs, book);
+  const total = cats.reduce((s, c) => s + c.amount, 0);
+  const open = (id: string) => { setFilters({ categoryId: id }); go('transactions'); };
+  return (
+    <section className="card where">
+      <header className="card-head"><div><h3>Where it went</h3><p className="note">{range.label}</p></div><PeriodStepper /></header>
+      {cats.length ? <div className="donut-row">
+        <Donut items={cats} total={total} active={active} onActive={setActive} />
+        <ul className="donut-key">{cats.slice(0, 7).map((c, i) => <li key={c.id} className={active === i ? 'on' : active !== null ? 'dim' : ''} onMouseEnter={() => setActive(i)} onMouseLeave={() => setActive(null)}>
+          <button onClick={() => open(c.id)} title={`See every ${c.name} transaction`}><i style={{ background: colorAt(i) }} /><span className="k-name"><span className="emoji">{c.icon}</span>{c.name}</span><span className="num">{fmtMoney(c.amount)}</span><em className="num">{c.pct}%</em></button></li>)}
+          {cats.length > 7 && <li className="more-cats"><i style={{ background: colorAt(7) }} />{cats.length - 7} more categories</li>}</ul>
+      </div> : <Empty title="No spending yet" body="Expenses in this period will show up here." />}
+    </section>
   );
 }
 
 export function Dashboard() {
-  const { book, bal, filters, range, setFilters, go, editTx, quickAdd, confirm, toast } = useApp();
+  const { book, filters, range, go, confirm, toast } = useApp();
   const txs = useMemo(() => applyFilters(book, filters, range), [book, filters, range]);
-  const t = totals(txs);
-  const cats = spendByCategory(txs, book);
-  const insights = useMemo(() => buildInsights(book, filters, range), [book, filters, range]);
-  const now = today();
-  const ended = !range.empty && range.to < now;
-  const endBal = ended ? computeBalances(book, range.to) : bal;
-  const balance = filters.accountId === 'all' ? endBal.total : endBal.byAccount[filters.accountId] ?? 0;
-  const acctName = filters.accountId === 'all' ? 'all accounts' : accOf(book, filters.accountId)?.name;
-  const dayN = range.cycleIndex !== undefined && !ended && range.from <= now ? daysBetween(range.from, now) + 1 : null;
-  const left = t.income - t.expenses - t.savings;
-  const pace = useMemo(() => buildPace(book), [book]);
-  const members = book.members || [];
-  const perMember = members.length > 1 ? members.map(m => { const mt = totals(txs.filter(x => x.by === m.id)); return { ...m, ...mt, salary: txs.filter(x => x.by === m.id && x.type === 'income' && x.categoryId === SALARY).reduce((a, x) => a + x.amount, 0) }; }) : [];
-
+  const pace = useMemo(() => buildPace(book).slice(1), [book]);
   if (!book.accounts.length) return (
     <Empty title="Start with your accounts" body="Add each place your money sits (cash, Canara, Kotak) with its current balance. Then record your salary to begin your first salary cycle."
       action={<button className="btn primary" onClick={() => go('accounts')}>Add your first account</button>} />
@@ -134,52 +306,28 @@ export function Dashboard() {
     title: 'Delete the sample data?', body: 'This removes the demo transactions and the three demo accounts so you can start with your own numbers. Anything you added yourself is kept.', action: 'Delete sample data', danger: true,
     run: () => { removeSample(); toast('Sample data deleted'); },
   });
+  const spend = txs.filter(t => t.type === 'expense');
+  const buckets = makeBuckets(range, 'day', book, spend);
   return (
     <>
-      {book.settings.hasSample && <div className="banner"><span>You are looking at sample data from September 2026.</span><button className="btn small" onClick={clearSample}>Delete sample data and start fresh</button></div>}
-      <div className="hero">
-        <div className="hero-period">
-          <p className="hero-title">{range.title}</p>
-          <div className="hero-range"><h2>{range.label}</h2><PeriodStepper /></div>
-          {range.empty
-            ? <p className="note">Record an income in the Salary category and its date starts your first cycle. <button className="link" onClick={() => editTx({ type: 'income', categoryId: SALARY, description: 'Salary' })}>Record salary</button></p>
-            : <p className="note">{dayN ? `Day ${dayN} of this cycle. It stays open until you record your next salary.` : `${t.count} transaction${t.count === 1 ? '' : 's'} in this period`}</p>}
-        </div>
-        <div className="hero-balance">
-          <p className="hero-title">{ended ? `Balance on ${fmtDate(range.to)}` : 'Balance now'}, {acctName}</p>
-          <p className="hero-num num">{fmtMoney(balance)}</p>
-        </div>
+      {book.settings.hasSample && <div className="banner"><span>You are looking at sample data.</span><button className="btn small" onClick={clearSample}>Delete sample data</button></div>}
+      <div className="bento">
+        <Sparks />
+        <Hero />
+        <TodayCard />
+        {pace.length > 0 && <div className="nudges">{pace.map((p, k) => <div key={k} className={'nudge ' + p.tone}><strong>{p.title}</strong><p>{p.text}</p></div>)}</div>}
+        <QuickTiles />
+        <AccountsCard />
+        <WhereItWent />
+        <section className="card trend">
+          <header className="card-head"><h3>Day by day</h3></header>
+          {spend.length && buckets.length ? <BarChart labels={buckets.map(b => b.label)} series={[{ name: 'Spending', color: 'var(--bar)', values: buckets.map(b => sumIn(spend, b, () => true)) }]} height={190} /> : <Empty title="No spending to chart" body="Daily spending appears here as you record it." />}
+        </section>
+        <section className="card recent">
+          <header className="card-head"><h3>Recent</h3><button className="link-btn" onClick={() => go('transactions')}>See all {txs.length}<Icon name="arrow" size={15} /></button></header>
+          <ActivityList txs={txs} limit={6} />
+        </section>
       </div>
-      {pace.length > 0 && <div className="pace">{pace.map((p, k) => <div key={k} className={'pace-card ' + p.tone}><strong>{p.title}</strong><p>{p.text}</p></div>)}</div>}
-      <FilterBar />
-      <div className="stats">
-        <div className="stat"><p>Income</p><strong className="num pos">{fmtMoney(t.income)}</strong></div>
-        <div className="stat"><p>Expenses</p><strong className="num neg">{fmtMoney(t.expenses)}</strong>{t.income > 0 && <span>{pct(t.expenses, t.income)}% of income</span>}</div>
-        <div className="stat"><p>Savings</p><strong className="num">{fmtMoney(t.savings)}</strong>{t.income > 0 && t.savings > 0 && <span>{pct(t.savings, t.income)}% of income</span>}</div>
-        <div className="stat"><p>Left from income</p><strong className={'num' + (left < 0 ? ' neg' : '')}>{fmtMoney(left)}</strong><span>after expenses and savings</span></div>
-        <div className="stat"><p>Transactions</p><strong className="num">{t.count}</strong></div>
-      </div>
-      {insights.length > 0 && <Panel title="What stands out"><ul className="insights">{insights.map((i, k) => <li key={k} className={i.tone}>{i.text}</li>)}</ul></Panel>}
-      {perMember.length > 0 && <Panel title="Family" note={`Everyone's salaries add up to the family income for this period: ${perMember.filter(m => m.salary > 0).map(m => `${m.name} ${fmtMoney(m.salary)}`).join(' + ') || 'no salary recorded yet'}${perMember.filter(m => m.salary > 0).length > 1 ? ` = ${fmtMoney(perMember.reduce((a, m) => a + m.salary, 0))}` : ''}.`} className="flush-body">
-        <div className="table-wrap"><table className="table"><thead><tr><th>Member</th><th className="r">Income brought in</th><th className="r">Expenses entered</th><th className="r">Savings</th><th className="r">Entries</th></tr></thead>
-          <tbody>{perMember.map(m => <tr key={m.id}><td>{m.name}</td><td className="r num pos">{fmtMoney(m.income)}</td><td className="r num neg">{fmtMoney(m.expenses)}</td><td className="r num">{fmtMoney(m.savings)}</td><td className="r num">{m.count}</td></tr>)}</tbody></table></div>
-      </Panel>}
-      <div className="grid two">
-        <Panel title="Spending by category" note="Expenses only. Savings and transfers are not counted as spending.">
-          {cats.length ? <div className="donut-row"><Donut items={cats} total={t.expenses} />
-            <ul className="donut-key">{cats.slice(0, 7).map((c, i) => <li key={c.id}><i style={{ background: colorAt(i) }} />{c.name}<span className="num">{c.pct}%</span></li>)}{cats.length > 7 && <li><i style={{ background: colorAt(7) }} />{cats.length - 7} more</li>}</ul></div>
-            : <Empty title="No expenses yet" body="Add an expense and you will see where the money goes." action={<button className="btn" onClick={quickAdd}>Add expense</button>} />}
-        </Panel>
-        <Panel title="Top spending categories" note="Highest first. Select one to filter everything by it.">
-          {cats.length ? <HBars items={cats.slice(0, 8)} onPick={id => setFilters({ categoryId: filters.categoryId === id ? 'all' : id })} /> : <Empty title="Nothing to rank" body="Your biggest categories will be listed here." />}
-        </Panel>
-      </div>
-      <TrendPanel txs={txs} />
-      <Panel title="Recent transactions" right={<button className="btn small" onClick={() => go('transactions')}>See all {txs.length}</button>}><TxTable txs={txs} limit={8} compact /></Panel>
-      <Panel title="Accounts" note="Each account as a sheet: every entry in this period with its running balance. Select a row to edit it.">
-        <div className="sheets">{book.accounts.filter(a => filters.accountId === 'all' || a.id === filters.accountId).map(a => <Sheet key={a.id} account={a} range={range} />)}</div>
-        <div className="total-row"><span>Total across all accounts</span><strong className="num">{fmtMoney(bal.total)}</strong></div>
-      </Panel>
     </>
   );
 }
@@ -193,14 +341,25 @@ export function removeSample() {
 
 // ---------- Transactions ----------
 export function Transactions() {
-  const { book, filters, range } = useApp();
+  const { book, filters, range, setFilters } = useApp();
+  const [open, setOpen] = useState(false);
   const txs = useMemo(() => applyFilters(book, filters, range), [book, filters, range]);
   const t = totals(txs);
+  const active = [filters.accountId, filters.categoryId, filters.type, filters.method].filter(v => v !== 'all').length;
   return (
     <>
-      <FilterBar search />
-      <div className="summary-line"><span>{range.label}</span><span>{t.count} transactions</span><span>Income <b className="num pos">{fmtMoney(t.income)}</b></span><span>Expenses <b className="num neg">{fmtMoney(t.expenses)}</b></span><span>Savings <b className="num">{fmtMoney(t.savings)}</b></span></div>
-      <Panel className="flush"><TxTable txs={txs} /></Panel>
+      <div className="act-tools">
+        <label className="search"><Icon name="search" size={18} /><input type="search" placeholder="Search" value={filters.search} onChange={e => setFilters({ search: e.target.value })} /></label>
+        <button className={'btn ghost-line' + (open || active ? ' on' : '')} onClick={() => setOpen(o => !o)} aria-expanded={open}><Icon name="filter" size={16} />Filters{active > 0 && <span className="count">{active}</span>}</button>
+      </div>
+      {open && <div className="card filter-card"><FilterBar /></div>}
+      <div className="summary">
+        <div><span>{range.title}</span><b>{range.label}</b></div>
+        <div><span>In</span><b className="num pos">{fmtMoney(t.income)}</b></div>
+        <div><span>Out</span><b className="num">{fmtMoney(t.expenses)}</b></div>
+        <div><span>Saved</span><b className="num">{fmtMoney(t.savings)}</b></div>
+      </div>
+      <ActivityList txs={txs} />
     </>
   );
 }
@@ -303,6 +462,51 @@ export function Cycles() {
   );
 }
 
+// ---------- Daily average ----------
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function DailyAverage() {
+  const { book, filters, range } = useApp();
+  const txs = useMemo(() => applyFilters(book, filters, range), [book, filters, range]);
+  const ds = dailyStats(txs, range);
+  // Compare like with like: while this period is still running, cut the previous one at the same day count.
+  const prevFull = previousRange(range, book);
+  const running = range.open || range.to > today();
+  const prevR = prevFull && ds && running ? { ...prevFull, to: addDays(prevFull.from, ds.days - 1) < prevFull.to ? addDays(prevFull.from, ds.days - 1) : prevFull.to } : prevFull;
+  const prev = prevR ? dailyStats(applyFilters(book, filters, prevR), prevR) : null;
+  const avg = useCountUp(ds ? ds.avg : 0);
+  if (!ds) return <section className="card daily"><header className="card-head"><h3>Average daily spend</h3></header><Empty title="No expenses in this period" body="Record expenses and your daily average appears here." /></section>;
+  const diff = prev ? ds.avg - prev.avg : 0;
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  const maxDow = Math.max(1, ...ds.byDow);
+  const peak = ds.byDow.indexOf(Math.max(...ds.byDow));
+  return (
+    <section className="card daily">
+      <div className="daily-main">
+        <p className="eyebrow">Average daily spend · {range.label}</p>
+        <p className="daily-num num">{fmtMoney(Math.round(avg))}<small> a day</small></p>
+        <p className="note">{fmtMoney(ds.total)} spent over {ds.days} day{ds.days === 1 ? '' : 's'}, counting days with no spending. Expenses only, savings and transfers are left out.</p>
+        {prev && Math.abs(diff) >= 1 && <p className={'daily-vs ' + (diff > 0 ? 'up' : 'down')}>{diff > 0 ? '▲' : '▼'} {fmtMoney(Math.round(Math.abs(diff)))} a day {diff > 0 ? 'more' : 'less'} than {running ? `the first ${ds.days} days of the ${prevFull!.title}` : `the ${prevFull!.title}`} ({fmtMoney(Math.round(prev.avg))} a day)</p>}
+        {ds.bigCount > 0 && <div className="daily-every"><span>Everyday spending</span><b className="num">{fmtMoney(Math.round(ds.everydayAvg))} a day</b><small>Leaves out {ds.bigCount} big payment{ds.bigCount === 1 ? '' : 's'} of {fmtMoney(BIG_PAYMENT)} or more ({fmtMoney(ds.bigTotal)}), like rent or family. This is what a normal day costs you.</small></div>}
+      </div>
+      <div className="daily-facts">
+        <div><span>Usual day</span><b className="num">{fmtMoney(Math.round(ds.median))}</b><small>half of days cost less</small></div>
+        <div><span>Weekdays</span><b className="num">{fmtMoney(Math.round(ds.weekdayAvg))}</b><small>Mon to Fri, a day</small></div>
+        <div><span>Weekends</span><b className="num">{fmtMoney(Math.round(ds.weekendAvg))}</b><small>Sat and Sun, a day</small></div>
+        <div><span>No-spend days</span><b className="num">{ds.noSpend}</b><small>of {ds.days}</small></div>
+        {ds.top && <div><span>Highest day</span><b className="num">{fmtMoney(ds.top.amount)}</b><small>{fmtDate(ds.top.date)}</small></div>}
+      </div>
+      <div className="dow" aria-label="Average spend by day of the week">
+        {order.map(w => <div key={w} className={'dow-col' + (w === peak ? ' peak' : '')} title={`${DOW[w]}: ${fmtMoney(Math.round(ds.byDow[w]))} a day on average`}>
+          <span className="dow-val num">{ds.byDow[w] >= 1000 ? `₹${(ds.byDow[w] / 1000).toFixed(1)}k` : fmtMoney(Math.round(ds.byDow[w]))}</span>
+          <span className="dow-bar"><i style={{ height: `${Math.max(3, (ds.byDow[w] / maxDow) * 100)}%` }} /></span>
+          <span className="dow-name">{DOW[w]}</span>
+        </div>)}
+      </div>
+      <p className="note">Your costliest day of the week is {DOW[peak]}, at about {fmtMoney(Math.round(ds.byDow[peak]))} on average.</p>
+    </section>
+  );
+}
+
 // ---------- Reports ----------
 export function Reports() {
   const { book, filters, range } = useApp();
@@ -315,14 +519,17 @@ export function Reports() {
   const months = makeBuckets({ ...range, from: '0000-01-01', to: '9999-12-31', empty: false }, 'month', book, all).slice(-12);
   const top = txs.filter(t => t.type === 'expense').sort((a, b) => b.amount - a.amount).slice(0, 10);
   const is = (type: string) => (t: Tx) => t.type === type;
+  const insights = useMemo(() => buildInsights(book, filters, range), [book, filters, range]);
   return (
     <>
-      <FilterBar />
+      <div className="card filter-card"><FilterBar /></div>
       <p className="note pad">Showing {range.label}. Comparisons across cycles and months use every period, with the other filters applied.</p>
+      <DailyAverage />
+      {insights.length > 0 && <Panel title="What stands out"><ul className="insights">{insights.map((i, k) => <li key={k} className={i.tone}>{i.text}</li>)}</ul></Panel>}
       <div className="grid two">
         <Panel title="Spending by category">{cats.length ? <HBars items={cats} /> : <Empty title="No expenses" body="Nothing was spent in this period with these filters." />}</Panel>
         <Panel title="Spending by account">{accts.length ? <HBars items={accts} /> : <Empty title="No expenses" body="Nothing was spent in this period with these filters." />}</Panel>
-        <Panel title="Income vs expenses" note={long ? 'By month' : 'By week'}>
+         <Panel title="Income vs expenses" note={long ? 'By month' : 'By week'}>
           {buckets.length ? <BarChart labels={buckets.map(b => b.label)} series={[{ name: 'Income', color: 'var(--pos)', values: buckets.map(b => sumIn(txs, b, is('income'))) }, { name: 'Expenses', color: 'var(--neg)', values: buckets.map(b => sumIn(txs, b, is('expense'))) }]} /> : <Empty title="Nothing to compare" body="Record income and expenses to see them side by side." />}
         </Panel>
         <Panel title="Savings trend" note="By month, all time">
