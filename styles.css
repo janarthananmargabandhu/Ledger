@@ -516,3 +516,62 @@ main{padding:12px 16px 84px}
 .toast{bottom:70px}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+
+/* ---------- Welcome moment: money plant + good news ---------- */
+.welcome{position:fixed;inset:0;z-index:9000;overflow-y:auto;display:flex;flex-direction:column;align-items:center;gap:14px;padding:calc(26px + env(safe-area-inset-top,0px)) 20px calc(22px + env(safe-area-inset-bottom,0px));
+  background:radial-gradient(ellipse 120% 60% at 50% 0%,#1A2A10 0,#0B1008 55%,#070906 100%);color:#F1F2EC;animation:wlIn .5s ease both;transition:opacity .38s ease,transform .38s ease}
+.welcome.out{opacity:0;transform:translateY(16px)}
+.welcome>*{width:min(420px,100%)}
+.wl-confetti{position:fixed;inset:0;width:100%!important;height:100%;pointer-events:none;z-index:2}
+.wl-head{text-align:center;animation:wlUp .6s .05s ease both}
+.wl-hello{font:600 15px/1.3 var(--display);letter-spacing:.04em;color:#C6F432}
+.wl-head h1{font:700 40px/1.05 var(--display);letter-spacing:-.03em;margin-top:2px}
+.wl-garden{position:relative;display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 18px 18px;border-radius:28px;background:linear-gradient(180deg,rgba(198,244,50,.07),rgba(198,244,50,.02));border:1px solid rgba(198,244,50,.12);animation:wlUp .6s .15s ease both}
+.wl-plant{width:min(62vw,230px);height:auto;overflow:visible}
+.wl-sway{transform-origin:100px 196px;animation:wlSway 4s ease-in-out infinite}
+.wl-plant.drink .wl-sway{animation:wlDrink .8s .85s ease}
+.wl-stem{stroke-dasharray:1;stroke-dashoffset:1;animation:wlDraw .7s .1s ease forwards}
+.wl-leaf{transform-box:fill-box;transform-origin:0 0;transform:scale(0);animation:wlLeaf .55s cubic-bezier(.3,1.6,.5,1) forwards}
+.wl-pop{transform-box:fill-box;transform-origin:center;opacity:0;animation:wlPop .5s cubic-bezier(.3,1.6,.5,1) forwards}
+.wl-seed{animation:wlSeed 2.4s ease-in-out infinite;transform-origin:100px 194px}
+.wl-bud{animation:wlBud 2s ease-in-out infinite}
+.wl-can{position:absolute;right:14%;top:-4px;width:64px;opacity:0;pointer-events:none;transform:translate(30px,-10px) rotate(0)}
+.wl-can.pour{animation:wlCan 1.7s ease forwards}
+.wl-can svg{width:64px;display:block}
+.wl-can i{position:absolute;left:-2px;top:12px;width:5px;height:9px;border-radius:50% 50% 50% 50%/60% 60% 40% 40%;background:#8FB6FF;opacity:0}
+.wl-can.pour i{animation:wlDrop .6s linear infinite}
+.wl-can.pour i:nth-child(3){animation-delay:.15s;left:4px}.wl-can.pour i:nth-child(4){animation-delay:.3s;left:-6px}.wl-can.pour i:nth-child(5){animation-delay:.45s;left:1px}
+.wl-plant-info{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.wl-chip{font-size:12.5px;font-weight:700;padding:6px 12px;border-radius:99px;background:rgba(198,244,50,.14);color:#D9FA7A}
+.wl-chip.streak{background:rgba(242,194,48,.16);color:#FFD45C}
+.wl-next{font-size:13px;color:#A3A69B;text-align:center;font-weight:600;max-width:300px}
+.wl-water{width:100%;border:0;border-radius:16px;padding:15px;font:700 16px/1 var(--font);background:#C6F432;color:#0D0E0B;cursor:pointer;box-shadow:0 10px 30px -10px rgba(198,244,50,.7);animation:wlPulse 2.2s 1.2s ease-in-out infinite;transition:transform .12s}
+.wl-water:active{transform:scale(.97)}
+.wl-water.done,.wl-water:disabled{animation:none;background:rgba(255,255,255,.08);color:#C9CBC1;box-shadow:none;font-size:14px;cursor:default}
+.wl-tip{display:flex;flex-direction:column;gap:8px;padding:18px;border-radius:24px;background:linear-gradient(160deg,rgba(242,194,48,.14),rgba(198,244,50,.06));border:1px solid rgba(242,194,48,.25);animation:wlUp .5s .3s ease both}
+.wl-tag{font-size:11.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#FFD45C}
+.wl-tip-text{font:600 17px/1.4 var(--font);color:#F6F7F0;animation:wlUp .35s ease both}
+.wl-tip-by{font-size:12px;color:#A3A69B;font-weight:600}
+.wl-add{display:flex;flex-direction:column;gap:8px}
+.wl-add textarea{width:100%;resize:none;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.3);color:#F1F2EC;padding:12px;font:500 15px/1.4 var(--font);outline:none}
+.wl-add textarea:focus{border-color:#C6F432}
+.wl-add-row{display:flex;gap:8px;margin-top:4px}
+.wl-add-row button{flex:1;border-radius:12px;padding:12px;font:700 14px/1 var(--font);cursor:pointer}
+.wl-ghost{background:none;border:1px solid rgba(255,255,255,.16);color:#E6E8DF}
+.wl-save{background:#FFD45C;border:0;color:#1A1405}
+.wl-save:disabled{opacity:.45;cursor:default}
+.wl-go{border:1px solid rgba(255,255,255,.18);background:none;color:#F1F2EC;border-radius:16px;padding:14px;font:700 15px/1 var(--font);cursor:pointer;margin-top:auto;animation:wlUp .5s .45s ease both}
+@keyframes wlIn{from{opacity:0}}
+@keyframes wlUp{from{opacity:0;transform:translateY(14px)}}
+@keyframes wlSway{0%,100%{transform:rotate(-1.4deg)}50%{transform:rotate(1.4deg)}}
+@keyframes wlDrink{0%{transform:scale(1)}35%{transform:scale(1.06,.94)}70%{transform:scale(.97,1.05)}100%{transform:scale(1)}}
+@keyframes wlDraw{to{stroke-dashoffset:0}}
+@keyframes wlLeaf{to{transform:scale(1)}}
+@keyframes wlPop{from{opacity:0;transform:scale(0)}to{opacity:1;transform:scale(1)}}
+@keyframes wlSeed{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+@keyframes wlBud{0%,100%{opacity:.6}50%{opacity:1}}
+@keyframes wlCan{0%{opacity:0;transform:translate(30px,-10px) rotate(0)}20%{opacity:1;transform:translate(0,0) rotate(0)}35%,75%{opacity:1;transform:translate(0,0) rotate(-32deg)}100%{opacity:0;transform:translate(30px,-10px) rotate(0)}}
+@keyframes wlDrop{0%{opacity:0;transform:translate(0,0)}15%{opacity:1}100%{opacity:0;transform:translate(-6px,70px)}}
+@keyframes wlPulse{0%,100%{box-shadow:0 10px 30px -10px rgba(198,244,50,.7)}50%{box-shadow:0 10px 40px -4px rgba(198,244,50,.95)}}
+@media (prefers-reduced-motion:reduce){.welcome *,.welcome{animation:none!important}.wl-leaf{transform:none}.wl-pop{opacity:1;transform:none}.wl-stem{stroke-dashoffset:0}}

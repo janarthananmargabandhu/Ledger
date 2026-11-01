@@ -3,16 +3,120 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#0D0E0B">
+<meta name="theme-color" content="#0A0B09">
 <title>Grow with Jana</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon-192.png">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Outfit:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Outfit:wght@500;600;700&display=swap" media="print" onload="this.media='all'">
 </head>
-<body>
+<body style="margin:0;background:#0A0B09">
 <div id="root"></div>
+<style>
+#splash{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;align-content:center;background:radial-gradient(ellipse 120% 70% at 50% 0%,#14200F 0,#070A06 55%,#050705 100%);color:#F1F2EC;font-family:"Manrope",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden;transition:opacity .5s ease,transform .5s cubic-bezier(.2,.8,.2,1);-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+#splash.out{opacity:0;transform:scale(1.08);pointer-events:none}
+#splash .sp-hi{position:absolute;top:calc(28px + env(safe-area-inset-top,0px));left:0;right:0;text-align:center;font:600 13px/1 "Outfit",system-ui,sans-serif;letter-spacing:.22em;text-transform:uppercase;color:#C6F432;opacity:0;animation:spFade .5s .9s ease forwards}
+#splash .sp-plant{position:relative;width:min(42vw,180px);aspect-ratio:270/344;cursor:pointer;border:0;padding:0;background:none;outline:none;margin-top:-6vh}
+#splash .sp-halo{position:absolute;left:50%;top:45%;width:190%;aspect-ratio:1;border-radius:50%;transform:translate(-50%,-50%) scale(.4);background:radial-gradient(circle,rgba(198,244,50,.28),rgba(198,244,50,0) 62%);opacity:0;animation:spHalo 1s .85s ease forwards,spBreathe 3.4s 1.9s ease-in-out infinite;pointer-events:none}
+#splash .sp-shadow{position:absolute;left:50%;bottom:-7%;width:78%;height:9%;margin-left:-39%;border-radius:50%;background:radial-gradient(ellipse,rgba(198,244,50,.35),rgba(198,244,50,0) 70%);opacity:0;transform:scale(.55);animation:spShadowIn .8s 1.25s cubic-bezier(.2,.8,.2,1) forwards,spShadowHover 3.4s 2.05s ease-in-out infinite}
+#splash .sp-float{position:absolute;inset:0;animation:spLift .8s 1.25s cubic-bezier(.2,.9,.25,1.15) forwards,spHover 3.4s 2.05s ease-in-out infinite}
+#splash svg.sp-logo{width:100%;height:100%;overflow:visible;animation:spDepth .8s 1.25s ease forwards}
+#splash .sp-ink .g{fill:rgba(255,255,255,0);stroke:rgba(255,255,255,0);stroke-width:1.4;animation:spInkG .5s .05s ease forwards}
+#splash .sp-ink .sp-leaf{fill:rgba(198,244,50,0);stroke:rgba(198,244,50,0);stroke-width:1.4;animation:spInkL .6s .25s ease forwards}
+#splash .sp-leaf{transform-box:view-box}
+#splash .sp-leaf.l{transform-origin:284px 205px;animation:spInkL .3s .9s ease forwards,spSprout .6s .9s cubic-bezier(.3,1.7,.5,1) both,spSwayL 3.2s 1.9s ease-in-out infinite}
+#splash .sp-leaf.r{transform-origin:288px 205px;animation:spInkL .3s 1s ease forwards,spSprout .65s 1s cubic-bezier(.3,1.7,.5,1) both,spSwayR 3.6s 2s ease-in-out infinite}
+#splash .sp-plant.poke .sp-leaf.l{animation:spInkL 0s forwards,spPokeL .55s ease}
+#splash .sp-plant.poke .sp-leaf.r{animation:spInkL 0s forwards,spPokeR .55s ease}
+#splash .sp-coin{position:absolute;left:50%;top:6%;width:34px;height:34px;margin-left:-17px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#FFF1A8,#F2C230 55%,#A8740A);color:#7A5205;display:grid;place-items:center;font:800 17px/1 system-ui,sans-serif;box-shadow:0 0 22px rgba(242,194,48,.6);pointer-events:none;opacity:0;animation:spCoin 1s cubic-bezier(.3,.6,.4,1) both}
+#splash .sp-soil{position:relative;margin-top:46px;width:min(56vw,220px);height:4px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden;opacity:0;animation:spFade .4s 1s ease forwards}
+#splash .sp-soil i{display:block;height:100%;width:8%;border-radius:4px;background:#C6F432;box-shadow:0 0 12px #C6F432;transition:width .7s cubic-bezier(.3,.7,.2,1)}
+#splash[data-stage="1"] .sp-soil i{width:38%}
+#splash[data-stage="2"] .sp-soil i{width:72%}
+#splash[data-stage="3"] .sp-soil i{width:100%}
+#splash .sp-msg{position:relative;margin-top:14px;min-height:20px;font-weight:600;font-size:14px;color:#C9CBC1;text-align:center;padding:0 24px;opacity:0;animation:spFade .4s 1.1s ease forwards}
+#splash .sp-msg.swap{animation:spSwap .35s ease forwards}
+#splash .sp-tip{position:absolute;bottom:calc(30px + env(safe-area-inset-bottom,0px));left:0;right:0;text-align:center;font-size:12.5px;font-weight:600;color:#8A8D83;opacity:0;animation:spFade .5s 2.8s ease forwards}
+#splash .sp-retry{position:relative;display:none;margin:16px auto 0;padding:10px 20px;border:0;border-radius:999px;background:#C6F432;color:#0D0E0B;font-family:inherit;font-weight:700;font-size:14px;line-height:1;cursor:pointer}
+#splash.err .sp-retry{display:block}
+#splash.err .sp-msg{color:#FF7A66}
+#splash.err .sp-soil i{background:#FF7A66;box-shadow:none}
+#splash .sp-drop{transform-box:view-box;transform:translateY(-300px);animation:spDrop .75s .15s cubic-bezier(.45,0,.9,.6) forwards}
+#splash .sp-spin{transform-box:fill-box;transform-origin:center;animation:spSpin .25s linear 3 .15s}
+#splash .sp-ring{fill:none;stroke:#F2C230;stroke-width:3;opacity:0;transform-box:fill-box;transform-origin:center;animation:spRingOut .6s .82s ease-out forwards}
+@keyframes spDrop{0%{transform:translateY(-300px);opacity:1}70%{transform:translateY(0)}80%{transform:translateY(-18px) scale(1)}90%{transform:translateY(2px) scale(.9)}100%{transform:translateY(8px) scale(0);opacity:0}}
+@keyframes spSpin{50%{transform:scaleX(.12)}}
+@keyframes spRingOut{0%{opacity:1;transform:scale(.4)}100%{opacity:0;transform:scale(3.2);stroke-width:.5}}
+@keyframes spSprout{0%{transform:scale(0) rotate(-20deg)}100%{transform:scale(1) rotate(0)}}
+@keyframes spInkG{to{fill:#FFFFFF;stroke:rgba(255,255,255,0)}}
+@keyframes spInkL{to{fill:#C6F432;stroke:rgba(198,244,50,0)}}
+@keyframes spLift{0%{transform:translateY(0) scale(.94)}100%{transform:translateY(-16px) scale(1)}}
+@keyframes spHover{0%,100%{transform:translateY(-16px)}50%{transform:translateY(-26px)}}
+@keyframes spDepth{to{filter:drop-shadow(0 16px 22px rgba(0,0,0,.7))}}
+@keyframes spHalo{to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+@keyframes spBreathe{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.08)}}
+@keyframes spShadowIn{to{opacity:1;transform:scale(1)}}
+@keyframes spShadowHover{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.8);opacity:.6}}
+@keyframes spSwayL{0%,100%{transform:rotate(0)}50%{transform:rotate(-5deg)}}
+@keyframes spSwayR{0%,100%{transform:rotate(0)}50%{transform:rotate(4deg)}}
+@keyframes spPokeL{0%,100%{transform:scale(1) rotate(0)}30%{transform:scale(1.08) rotate(-16deg)}65%{transform:scale(1) rotate(7deg)}}
+@keyframes spPokeR{0%,100%{transform:scale(1) rotate(0)}30%{transform:scale(1.08) rotate(14deg)}65%{transform:scale(1) rotate(-7deg)}}
+@keyframes spCoin{0%{transform:translateY(0) scale(.3);opacity:0}25%{transform:translateY(-70px) scale(1.05);opacity:1}55%{transform:translateY(-82px) scale(1)}100%{transform:translateY(60px) scale(.5);opacity:0}}
+@keyframes spFade{to{opacity:1}}
+@keyframes spSwap{0%{opacity:0;transform:translateY(6px)}100%{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){#splash .sp-drop,#splash .sp-ring{display:none}#splash,#splash *{animation:none!important}#splash *{opacity:1}#splash .sp-coin{display:none}#splash .sp-ink .g{fill:#fff;stroke:none}#splash .sp-ink .sp-leaf{fill:#C6F432;stroke:none}}
+</style>
+<div id="splash" data-stage="0" aria-live="polite">
+    <p class="sp-hi" id="sp-hi">Grow with Jana</p>
+  <button class="sp-plant" id="sp-plant" type="button" aria-label="Grow with Jana">
+    <span class="sp-halo"></span>
+    <span class="sp-shadow"></span>
+    <span class="sp-float">
+      <svg class="sp-logo" viewBox="140 80 270 344" aria-hidden="true">
+        <defs>
+          <path id="sp-logo" d="M358.75 97.50 320.50 97.25 316.00 99.25 302.00 102.25 284.50 109.00 276.00 114.25 270.50 118.50 261.00 128.00 256.25 134.25 251.00 144.75 248.00 154.00 247.00 161.00 245.50 163.25 244.25 163.25 242.75 161.75 238.50 155.00 230.50 148.00 220.50 142.50 210.25 139.50 195.75 139.00 187.50 139.75 170.25 144.75 165.25 147.50 165.00 149.50 165.50 150.50 173.00 158.00 191.25 182.50 194.50 185.75 201.25 190.75 210.50 194.00 218.25 194.00 223.25 193.25 237.25 188.25 238.75 186.75 238.75 184.00 237.00 180.25 229.25 168.25 223.25 162.25 219.50 159.50 204.50 151.75 203.75 150.50 204.50 149.75 207.75 149.75 215.50 151.75 226.25 156.75 235.25 164.50 241.50 173.75 245.75 184.25 250.00 202.75 248.75 204.25 247.25 204.25 240.25 201.50 229.25 199.00 214.75 198.75 208.75 199.25 197.75 202.00 187.00 206.75 178.00 213.00 169.25 221.50 162.50 230.75 158.50 238.25 152.00 256.25 152.00 287.00 154.00 291.25 156.75 300.75 160.25 308.25 167.50 319.25 178.50 330.25 187.00 336.00 193.00 339.00 201.75 342.00 215.25 344.00 226.25 344.00 233.25 342.75 241.00 342.25 249.50 339.75 255.75 336.75 261.50 333.00 263.75 333.25 264.75 334.75 264.75 344.00 262.75 353.25 260.25 358.00 258.25 360.75 253.25 365.25 246.00 369.50 237.50 372.25 221.75 372.25 212.25 369.75 203.50 365.25 194.50 356.50 192.00 356.00 157.75 372.75 156.50 374.50 156.75 376.75 159.50 382.00 164.50 389.00 171.75 396.25 182.50 403.50 194.25 408.50 205.50 411.50 216.00 412.50 220.50 414.25 240.75 414.25 246.00 412.25 255.25 411.50 263.50 409.25 277.75 403.25 285.50 398.50 291.25 394.00 297.50 387.75 302.00 381.50 307.25 371.00 309.50 363.75 310.75 357.25 312.00 343.75 311.75 205.75 310.25 203.75 309.00 203.25 267.50 203.25 266.00 204.00 265.00 205.50 264.50 211.75 263.25 213.00 261.00 212.75 255.50 208.00 254.00 203.75 253.25 193.00 255.25 175.25 260.25 158.25 268.50 144.00 280.50 132.00 293.75 122.75 305.00 117.50 311.50 115.00 313.00 115.00 313.50 116.00 312.00 117.50 303.50 122.50 292.50 131.25 284.00 139.75 275.50 152.25 269.50 165.00 264.25 183.75 263.50 192.25 264.25 193.75 265.50 194.50 272.50 195.75 278.50 196.25 293.25 196.00 308.25 192.50 312.25 190.75 319.50 185.75 328.25 177.00 334.75 166.25 350.75 119.25 355.00 110.25 359.50 104.50 359.75 99.00ZM228.00 239.25 233.00 238.50 238.50 239.00 245.75 241.00 252.25 244.50 257.50 249.25 261.50 254.50 265.25 264.25 265.75 268.00 265.50 277.25 263.50 284.50 258.75 292.50 253.50 297.50 250.25 299.75 243.25 302.75 235.75 303.50 225.25 303.00 222.25 302.25 216.50 299.50 212.25 296.50 207.25 291.00 204.00 285.25 201.75 277.25 201.75 265.50 203.75 258.50 205.75 254.50 209.00 250.00 214.75 244.75 221.00 241.25Z"/>
+          <clipPath id="sp-cg"><rect x="268" y="198.4" width="140" height="152"/><rect x="130" y="349.5" width="274" height="90"/></clipPath>
+          <radialGradient id="sp-gold" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#FFF1A8"/><stop offset=".55" stop-color="#F2C230"/><stop offset="1" stop-color="#A8740A"/></radialGradient>
+          <clipPath id="sp-cl"><rect x="130" y="80" width="115.5" height="119.6"/></clipPath>
+          <clipPath id="sp-cr"><rect x="245.5" y="80" width="140" height="119.6"/></clipPath>
+        </defs>
+        <g class="sp-ink">
+          <use class="g" href="#sp-logo" clip-path="url(#sp-cg)"/>
+          <g class="sp-leaf l"><use href="#sp-logo" x="37" y="6" clip-path="url(#sp-cl)"/></g>
+          <g class="sp-leaf r"><use href="#sp-logo" x="37" y="6" clip-path="url(#sp-cr)"/></g>
+        </g>
+        <circle class="sp-ring" cx="289" cy="200" r="22"/>
+        <g class="sp-drop"><g class="sp-spin"><circle cx="289" cy="182" r="25" fill="url(#sp-gold)"/><circle cx="289" cy="182" r="18.5" fill="none" stroke="rgba(120,80,0,.55)" stroke-width="2.5"/><text x="289" y="192" text-anchor="middle" font-size="28" font-weight="800" fill="#7A5205" font-family="system-ui,sans-serif">₹</text></g></g>
+      </svg>
+    </span>
+  </button>
+  <div class="sp-soil"><i></i></div>
+  <p class="sp-msg" id="sp-msg">Opening your ledger</p>
+  <button class="sp-retry" type="button" onclick="location.reload()">Try again</button>
+</div>
+<script>
+(function(){
+  var el=document.getElementById('splash'),msg=document.getElementById('sp-msg'),plant=document.getElementById('sp-plant');
+  var nightStop=function(){};
+  var h=new Date().getHours();
+  var t0=Date.now(),MIN=1800,gone=false;
+  var say=function(t){if(msg.textContent===t)return;msg.textContent=t;msg.classList.remove('swap');void msg.offsetWidth;msg.classList.add('swap')};
+  plant.addEventListener('click',function(){
+    plant.classList.remove('poke');void plant.offsetWidth;plant.classList.add('poke');
+    for(var k=0;k<3;k++)(function(k){var c=document.createElement('span');c.className='sp-coin';c.textContent='\u20B9';c.style.left=(26+k*24)+'%';c.style.animationDelay=(k*90)+'ms';plant.appendChild(c);setTimeout(function(){c.remove()},1400)})(k);
+    if(navigator.vibrate)try{navigator.vibrate(12)}catch(e){}
+  });
+  window.__splash={
+    stage:function(n,text){if(gone)return;el.classList.remove('err');el.setAttribute('data-stage',n);if(text)say(text)},
+    error:function(text){if(gone)return;el.classList.add('err');say(text)},
+    done:function(){
+      if(gone)return;gone=true;el.setAttribute('data-stage','3');say('Ready');
+      setTimeout(function(){el.classList.add('out');setTimeout(function(){nightStop();el.remove()},520)},Math.max(250,MIN-(Date.now()-t0)));
+    }
+  };
+})();
+</script>
 <script type="module" src="./main.tsx"></script>
 </body>
 </html>

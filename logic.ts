@@ -21,11 +21,12 @@ export interface Tx {
   by?: string;             // id of the family member who entered it
 }
 export interface Member { id: string; name: string; }
+export interface Tip { id: string; text: string; by?: string; at: string; }
 export interface Book {
   accounts: Account[];
   categories: Category[];
   txs: Tx[];
-  settings: { hasSample: boolean; voiceLang?: 'ta' | 'en'; cycleBy?: string };  // cycleBy: member whose salary starts a cycle ('' = anyone)
+  settings: { hasSample: boolean; voiceLang?: 'ta' | 'en'; cycleBy?: string; water?: { last: string; streak: number }; tips?: Tip[] };  // water: money plant watering streak  // cycleBy: member whose salary starts a cycle ('' = anyone)
   members?: Member[];      // filled in from the shared ledger, not saved with the book
 }
 
@@ -589,4 +590,61 @@ export function dailyStats(txs: Tx[], r: Range, now = today()): DailyStats | nul
   const big = exp.filter(t => t.date >= from && t.date <= end && t.amount >= BIG_PAYMENT);
   const bigTotal = big.reduce((s2, t) => s2 + t.amount, 0);
   return { everydayAvg: (total - bigTotal) / all.length, bigCount: big.length, bigTotal, days: all.length, total, avg: total / all.length, median, noSpend: all.filter(x => x.amount === 0).length, top, byDow, weekdayAvg: avgOf(wk), weekendAvg: avgOf(we), from, to: end };
+}
+
+
+// ---------- Welcome: the money plant and the good news shown when the app opens ----------
+export interface Plant { stage: number; name: string; rate: number; saved: number; income: number; streak: number; wateredToday: boolean; next: string; }
+const STAGES = ['Seed', 'Sprout', 'Young plant', 'Leafy plant', 'Flowering', 'Money tree'];
+const STEPS = [0, 0.0001, 0.05, 0.1, 0.2, 0.3];
+/** The plant grows with the share of this cycle's income put into savings. Watering is a daily streak on top. */
+export function moneyPlant(book: Book, now = today()): Plant {
+  const cycles = getCycles(book), c = cycles[currentCycleIndex(cycles, now)];
+  const t = c ? totals(book.txs.filter(x => x.date >= c.start && x.date <= now)) : { income: 0, savings: 0, expenses: 0, count: 0 };
+  const rate = t.income > 0 ? t.savings / t.income : 0;
+  let stage = 0; STEPS.forEach((v, i) => { if (t.income > 0 && rate >= v && (i > 0 ? t.savings > 0 : true)) stage = i; });
+  const w = book.settings.water;
+  const alive = !!w && (w.last === now || w.last === addDays(now, -1));
+  const nextStep = STEPS[stage + 1];
+  const next = !c ? 'Record your salary to plant your seed.'
+    : nextStep === undefined ? 'Fully grown. Keep saving to keep it this way.'
+    : `Save ${fmtMoney(Math.max(1, Math.ceil(nextStep * t.income - t.savings)))} more this cycle to reach ${STAGES[stage + 1]}.`;
+  return { stage, name: STAGES[stage], rate, saved: t.savings, income: t.income, streak: alive ? w!.streak : 0, wateredToday: !!w && w.last === now, next };
+}
+export function waterPlant(book: Book, now = today()): Book {
+  const w = book.settings.water;
+  if (w && w.last === now) return book;
+  const streak = w && w.last === addDays(now, -1) ? w.streak + 1 : 1;
+  return { ...book, settings: { ...book.settings, water: { last: now, streak } } };
+}
+// ---------- Saving tips: a starter set, plus the ones the family adds ----------
+export const STARTER_TIPS = [
+  'Wait 24 hours before any non-essential buy over ₹1,000. Most of the urge passes.',
+  'Move your savings on salary day, before you spend anything. Spend what is left, not save what is left.',
+  'Cook one extra meal at home each week instead of ordering in. That alone can save ₹2,000 a month.',
+  'Check your subscriptions today. Cancel the ones you did not open last month.',
+  'Carry a water bottle. Small daily buys like bottled water and tea add up fast.',
+  'Buy groceries with a list, and never shop hungry.',
+  'Compare the price per kg, not the pack price. Bigger is not always cheaper.',
+  'Pay credit card bills in full every month. Interest wipes out every discount you got.',
+  'Set a weekly cash limit for small spends. When it is gone, wait for next week.',
+  'Unsubscribe from shopping app notifications. Fewer sale alerts, fewer buys.',
+  'Switch off lights, fans and the geyser when not needed. It shows up on the electricity bill.',
+  'Plan festival and birthday spending at the start of the month so it does not surprise you.',
+  'Before buying, ask: will I use this at least 10 times?',
+  'Keep an emergency fund of 3 months of expenses, so a surprise never becomes a loan.',
+  'Round up every expense in your head. The difference is your bonus savings.',
+];
+/** One tip per day, alternating between the family's own tips and the starter set. */
+export function tipsFor(book: Book): { text: string; by?: string; own: boolean }[] {
+  const own = (book.settings.tips || []).map(t => ({ text: t.text, by: t.by, own: true }));
+  const base = STARTER_TIPS.map(text => ({ text, own: false }));
+  const out: { text: string; by?: string; own: boolean }[] = [];
+  for (let i = 0; i < Math.max(own.length, base.length); i++) { if (own[i]) out.push(own[i]); if (base[i]) out.push(base[i]); }
+  return out;
+}
+export const dayIndex = (n: number, now = today()) => (n ? Math.floor(parse(now).getTime() / 864e5) % n : 0);
+export function addTip(book: Book, text: string, by?: string, now = today()): Book {
+  const t: Tip = { id: uid(), text: text.trim().slice(0, 160), at: now, ...(by ? { by } : {}) };
+  return { ...book, settings: { ...book.settings, tips: [t, ...(book.settings.tips || [])].slice(0, 60) } };
 }

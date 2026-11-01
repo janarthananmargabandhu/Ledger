@@ -336,7 +336,7 @@ export function removeSample() {
   const b = store.get();
   const txs = b.txs.filter(t => !t.sample);
   const used = new Set(txs.flatMap(t => [t.accountId, t.toAccountId]));
-  store.set({ ...b, txs, accounts: b.accounts.filter(a => !a.sample || used.has(a.id)).map(a => (a.sample ? { ...a, sample: undefined } : a)), settings: { hasSample: false } });
+  store.set({ ...b, txs, accounts: b.accounts.filter(a => !a.sample || used.has(a.id)).map(a => (a.sample ? { ...a, sample: undefined } : a)), settings: { ...b.settings, hasSample: false } });
 }
 
 // ---------- Transactions ----------

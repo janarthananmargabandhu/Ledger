@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Filters, Tx, computeBalances, defaultFilters, resolvePeriod } from './logic';
 import { store } from './store';
 import { AppCtx, ConfirmOpts, Ctx, Icon, Modal, Page } from './ui';
 import { QuickExpense, SalaryFix, TxForm } from './forms';
 import { VoiceEntry } from './voice';
+import { Welcome } from './welcome';
 import { Accounts, Categories, Cycles, Dashboard, Reports, Settings, Transactions } from './pages';
 
 const NAV: { id: Page; label: string; title: string }[] = [
@@ -17,6 +18,8 @@ const NAV: { id: Page; label: string; title: string }[] = [
 ];
 const TABS: Page[] = ['dashboard', 'transactions', 'reports'];
 const MORE: Page[] = ['accounts', 'cycles', 'categories', 'settings'];
+type SplashApi = { stage(n: number, text?: string): void; error(text: string): void; done(): void };
+const splash = () => (window as unknown as { __splash?: SplashApi }).__splash;
 const STATUS: Record<string, string> = { demo: 'Demo mode, nothing is saved', syncing: 'Saving', synced: 'Saved online', error: 'Last change not saved' };
 
 export default function App() {
@@ -24,6 +27,7 @@ export default function App() {
   const session = useSyncExternalStore(store.subscribe, store.session, store.session);
   const status = session.status;
   const [voice, setVoice] = useState(false);
+  const [welcome, setWelcome] = useState(true); // shown once each time the app is opened
   const [page, setPage] = useState<Page>('dashboard');
   const [filters, setF] = useState<Filters>(defaultFilters);
   const [txForm, setTxForm] = useState<Partial<Tx> | null>(null);
@@ -52,7 +56,16 @@ export default function App() {
     confirm: setAsk, toast,
   };
   const noAccounts = !book.accounts.length;
-  if (session.auth === 'loading' || (session.auth === 'in' && !session.ready)) return <div className="gate"><div className="loader" aria-hidden="true" /><p className="note">{session.error || 'Loading your ledger'}</p></div>;
+  const loading = session.auth === 'loading' || (session.auth === 'in' && !session.ready);
+  // The animated splash lives in index.html so it shows before this code downloads. Here we only move it along and dismiss it.
+  useEffect(() => {
+    const s = splash(); if (!s) return;
+    if (loading && session.error) s.error(session.error);
+    else if (session.auth === 'loading') s.stage(1, 'Checking it\u2019s you');
+    else if (loading) s.stage(2, session.name ? `Welcome back, ${session.name.split(' ')[0]}` : 'Bringing in your ledger');
+    else s.done();
+  }, [loading, session.auth, session.error, session.name]);
+  if (loading) return null;
   if (session.auth === 'out') return (
     <div className="gate"><div className="gate-card">
       <img className="gate-logo" src="./logo.png" alt="Grow with Jana" />
@@ -120,6 +133,7 @@ export default function App() {
         <p className="confirm-body">You opened a family invite link. If you join, you will see and add to the family's shared accounts and transactions. Your current ledger is kept, and you can return to it by leaving the family later.</p>
         <div className="form-actions"><button className="btn ghost" onClick={() => store.dismissJoin()}>Not now</button><button className="btn primary" onClick={async () => { if (await store.join(session.joinId)) toast('You joined the family ledger'); }}>Join family ledger</button></div>
       </Modal>}
+      {welcome && !noAccounts && <Welcome book={book} name={session.name} onDone={() => setWelcome(false)} />}
       {toastMsg && <div className="toast" role="status"><span>{toastMsg.text}</span>{toastMsg.undo && <button onClick={() => { toastMsg.undo!(); setToast(null); }}>Undo</button>}</div>}
     </Ctx.Provider>
   );
