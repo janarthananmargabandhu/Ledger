@@ -3,7 +3,7 @@ export type TxType = 'income' | 'expense' | 'savings' | 'transfer' | 'adjustment
 export type Method = 'cash' | 'upi' | 'debit' | 'credit' | 'bank' | 'other';
 export type CatKind = 'expense' | 'income' | 'savings' | 'any';
 
-export interface Account { id: string; name: string; opening: number; sample?: boolean; }
+export interface Account { id: string; name: string; opening: number; sample?: boolean; savings?: boolean; }  // savings: money moved here counts as saved
 export interface Category { id: string; name: string; icon: string; kind: CatKind; system?: boolean; }
 export interface Tx {
   id: string;
@@ -26,7 +26,7 @@ export interface Book {
   accounts: Account[];
   categories: Category[];
   txs: Tx[];
-  settings: { hasSample: boolean; voiceLang?: 'ta' | 'en'; cycleBy?: string; water?: { last: string; streak: number }; tips?: Tip[] };  // water: money plant watering streak  // cycleBy: member whose salary starts a cycle ('' = anyone)
+  settings: { hasSample: boolean; voiceLang?: 'ta' | 'en'; cycleBy?: string; water?: { last: string; streak: number; by?: string }; tips?: Tip[] };  // water: money plant watering streak  // cycleBy: member whose salary starts a cycle ('' = anyone)
   members?: Member[];      // filled in from the shared ledger, not saved with the book
 }
 
@@ -594,13 +594,14 @@ export function dailyStats(txs: Tx[], r: Range, now = today()): DailyStats | nul
 
 
 // ---------- Welcome: the money plant and the good news shown when the app opens ----------
-export interface Plant { stage: number; name: string; rate: number; saved: number; income: number; streak: number; wateredToday: boolean; next: string; }
+export interface Plant { stage: number; name: string; rate: number; saved: number; income: number; streak: number; wateredToday: boolean; wateredBy?: string; next: string; }
 const STAGES = ['Seed', 'Sprout', 'Young plant', 'Leafy plant', 'Flowering', 'Money tree'];
 const STEPS = [0, 0.0001, 0.05, 0.1, 0.2, 0.3];
 /** The plant grows with the share of this cycle's income put into savings. Watering is a daily streak on top. */
 export function moneyPlant(book: Book, now = today()): Plant {
   const cycles = getCycles(book), c = cycles[currentCycleIndex(cycles, now)];
   const t = c ? totals(book.txs.filter(x => x.date >= c.start && x.date <= now)) : { income: 0, savings: 0, expenses: 0, count: 0 };
+  if (c) t.savings += savedByTransfer(book, c.start, now);
   const rate = t.income > 0 ? t.savings / t.income : 0;
   let stage = 0; STEPS.forEach((v, i) => { if (t.income > 0 && rate >= v && (i > 0 ? t.savings > 0 : true)) stage = i; });
   const w = book.settings.water;
@@ -609,13 +610,25 @@ export function moneyPlant(book: Book, now = today()): Plant {
   const next = !c ? 'Record your salary to plant your seed.'
     : nextStep === undefined ? 'Fully grown. Keep saving to keep it this way.'
     : `Save ${fmtMoney(Math.max(1, Math.ceil(nextStep * t.income - t.savings)))} more this cycle to reach ${STAGES[stage + 1]}.`;
-  return { stage, name: STAGES[stage], rate, saved: t.savings, income: t.income, streak: alive ? w!.streak : 0, wateredToday: !!w && w.last === now, next };
+  return { stage, name: STAGES[stage], rate, saved: t.savings, income: t.income, streak: alive ? w!.streak : 0, wateredToday: !!w && w.last === now, wateredBy: w && w.last === now ? w.by : undefined, next };
 }
-export function waterPlant(book: Book, now = today()): Book {
+/** Net money moved into accounts marked as savings accounts (transfers in, minus transfers back out). */
+export function savedByTransfer(book: Book, from: string, to: string): number {
+  const sav = new Set(book.accounts.filter(a => a.savings).map(a => a.id));
+  if (!sav.size) return 0;
+  let n = 0;
+  for (const t of book.txs) {
+    if (t.type !== 'transfer' || t.date < from || t.date > to || !t.toAccountId) continue;
+    const inS = sav.has(t.toAccountId), outS = sav.has(t.accountId);
+    if (inS && !outS) n += t.amount; else if (outS && !inS) n -= t.amount;
+  }
+  return Math.max(0, n);
+}
+export function waterPlant(book: Book, by?: string, now = today()): Book {
   const w = book.settings.water;
   if (w && w.last === now) return book;
   const streak = w && w.last === addDays(now, -1) ? w.streak + 1 : 1;
-  return { ...book, settings: { ...book.settings, water: { last: now, streak } } };
+  return { ...book, settings: { ...book.settings, water: { last: now, streak, ...(by ? { by } : {}) } } };
 }
 // ---------- Saving tips: a starter set, plus the ones the family adds ----------
 export const STARTER_TIPS = [
@@ -644,7 +657,3 @@ export function tipsFor(book: Book): { text: string; by?: string; own: boolean }
   return out;
 }
 export const dayIndex = (n: number, now = today()) => (n ? Math.floor(parse(now).getTime() / 864e5) % n : 0);
-export function addTip(book: Book, text: string, by?: string, now = today()): Book {
-  const t: Tip = { id: uid(), text: text.trim().slice(0, 160), at: now, ...(by ? { by } : {}) };
-  return { ...book, settings: { ...book.settings, tips: [t, ...(book.settings.tips || [])].slice(0, 60) } };
-}

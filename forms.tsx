@@ -165,11 +165,12 @@ export function AccountForm({ initial, onClose }: { initial?: Account; onClose: 
   const { toast } = useApp();
   const [name, setName] = useState(initial?.name || '');
   const [opening, setOpening] = useState(initial ? String(initial.opening) : '0');
+  const [savings, setSavings] = useState(!!initial?.savings);
   const save = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
     const b = store.get();
-    const a: Account = { id: initial?.id || uid(), name: name.trim(), opening: parseFloat(opening) || 0, sample: initial?.sample };
+    const a: Account = { id: initial?.id || uid(), name: name.trim(), opening: parseFloat(opening) || 0, sample: initial?.sample, ...(savings ? { savings: true } : {}) };
     store.set({ ...b, accounts: initial ? b.accounts.map(x => (x.id === a.id ? a : x)) : [...b.accounts, a] });
     toast(initial ? 'Account updated' : 'Account added');
     onClose();
@@ -180,6 +181,7 @@ export function AccountForm({ initial, onClose }: { initial?: Account; onClose: 
         <Field label="Account name" wide><input value={name} onChange={e => setName(e.target.value)} placeholder="Canara, Kotak, Cash" autoFocus required /></Field>
         <Field label="Opening balance (₹)" wide><input type="number" step="0.01" value={opening} onChange={e => setOpening(e.target.value)} /></Field>
         <p className="hint wide">The opening balance is what the account held before the first transaction you record here.</p>
+        <label className="check wide"><input type="checkbox" checked={savings} onChange={e => setSavings(e.target.checked)} /><span><b>This is a savings account</b><br /><span className="hint">Money you transfer into it counts as saved and grows your money plant.</span></span></label>
         <div className="form-actions wide"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button type="submit" className="btn primary">{initial ? 'Save changes' : 'Add account'}</button></div>
       </form>
     </Modal>

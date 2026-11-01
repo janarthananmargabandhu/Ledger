@@ -17,7 +17,7 @@ export interface Session { auth: AuthState; ready: boolean; status: SyncStatus; 
 
 export function normalise(b: any): Book | null {
   if (!b || !Array.isArray(b.accounts) || !Array.isArray(b.categories) || !Array.isArray(b.txs)) return null;
-  return { accounts: b.accounts, categories: b.categories, txs: b.txs, settings: { hasSample: !!b.settings?.hasSample, voiceLang: b.settings?.voiceLang === 'en' ? 'en' : 'ta', cycleBy: b.settings?.cycleBy || '', ...(b.settings?.water?.last ? { water: { last: String(b.settings.water.last), streak: Number(b.settings.water.streak) || 1 } } : {}), ...(Array.isArray(b.settings?.tips) ? { tips: b.settings.tips.filter((x: any) => x && typeof x.text === 'string').slice(0, 60) } : {}) } };
+  return { accounts: b.accounts, categories: b.categories, txs: b.txs, settings: { hasSample: !!b.settings?.hasSample, voiceLang: b.settings?.voiceLang === 'en' ? 'en' : 'ta', cycleBy: b.settings?.cycleBy || '', ...(b.settings?.water?.last ? { water: { last: String(b.settings.water.last), streak: Number(b.settings.water.streak) || 1, ...(b.settings.water.by ? { by: String(b.settings.water.by) } : {}) } } : {}), ...(Array.isArray(b.settings?.tips) ? { tips: b.settings.tips.filter((x: any) => x && typeof x.text === 'string').slice(0, 60) } : {}) } };
 }
 const clean = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 const configured = !firebaseConfig.apiKey.startsWith('PASTE');

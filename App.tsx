@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Filters, Tx, computeBalances, defaultFilters, resolvePeriod } from './logic';
+import { Filters, Tx, computeBalances, defaultFilters, resolvePeriod, today } from './logic';
 import { store } from './store';
 import { AppCtx, ConfirmOpts, Ctx, Icon, Modal, Page } from './ui';
 import { QuickExpense, SalaryFix, TxForm } from './forms';
 import { VoiceEntry } from './voice';
 import { Welcome } from './welcome';
+import { noteState } from './reminders';
 import { Accounts, Categories, Cycles, Dashboard, Reports, Settings, Transactions } from './pages';
 
 const NAV: { id: Page; label: string; title: string }[] = [
@@ -27,7 +28,7 @@ export default function App() {
   const session = useSyncExternalStore(store.subscribe, store.session, store.session);
   const status = session.status;
   const [voice, setVoice] = useState(false);
-  const [welcome, setWelcome] = useState(true); // shown once each time the app is opened
+  const [welcomeClosed, setWelcomeClosed] = useState(false);
   const [page, setPage] = useState<Page>('dashboard');
   const [filters, setF] = useState<Filters>(defaultFilters);
   const [txForm, setTxForm] = useState<Partial<Tx> | null>(null);
@@ -56,7 +57,12 @@ export default function App() {
     confirm: setAsk, toast,
   };
   const noAccounts = !book.accounts.length;
+  // Welcome: on the first open of each day, and again on later opens until the plant has been watered today.
+  const seenToday = (() => { try { return localStorage.getItem('gwj-welcome') === new Date().toDateString(); } catch { return false; } })();
+  const welcome = !welcomeClosed && (!seenToday || book.settings.water?.last !== today());
+  const doneWelcome = () => { setWelcomeClosed(true); try { localStorage.setItem('gwj-welcome', new Date().toDateString()); } catch { /* storage blocked */ } };
   const loading = session.auth === 'loading' || (session.auth === 'in' && !session.ready);
+  useEffect(() => { if (!loading && book.accounts.length) noteState(book, session.name); }, [book, loading, session.name]);
   // The animated splash lives in index.html so it shows before this code downloads. Here we only move it along and dismiss it.
   useEffect(() => {
     const s = splash(); if (!s) return;
@@ -68,7 +74,7 @@ export default function App() {
   if (loading) return null;
   if (session.auth === 'out') return (
     <div className="gate"><div className="gate-card">
-      <img className="gate-logo" src="./logo.png" alt="Grow with Jana" />
+      <div className="gate-brand"><img src="./icon-192.png" alt="" /><span>Grow with Jana</span></div>
       <h1>Know where your salary went, from one payday to the next.</h1>
       <p className="note">{session.joinId ? 'You have been invited to a family ledger. Sign in to join it.' : 'Sign in to keep your accounts and transactions private to you and in step across your phone and laptop.'}</p>
       <button className="btn primary big" onClick={() => store.signIn()}>Continue with Google</button>
@@ -133,7 +139,7 @@ export default function App() {
         <p className="confirm-body">You opened a family invite link. If you join, you will see and add to the family's shared accounts and transactions. Your current ledger is kept, and you can return to it by leaving the family later.</p>
         <div className="form-actions"><button className="btn ghost" onClick={() => store.dismissJoin()}>Not now</button><button className="btn primary" onClick={async () => { if (await store.join(session.joinId)) toast('You joined the family ledger'); }}>Join family ledger</button></div>
       </Modal>}
-      {welcome && !noAccounts && <Welcome book={book} name={session.name} onDone={() => setWelcome(false)} />}
+      {welcome && !noAccounts && <Welcome book={book} name={session.name} onDone={doneWelcome} onVoice={() => { doneWelcome(); setVoice(true); }} />}
       {toastMsg && <div className="toast" role="status"><span>{toastMsg.text}</span>{toastMsg.undo && <button onClick={() => { toastMsg.undo!(); setToast(null); }}>Undo</button>}</div>}
     </Ctx.Provider>
   );

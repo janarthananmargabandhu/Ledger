@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && cp icon-192.png icon-512.png logo.png dist/",
+    "build": "tsc --noEmit && vite build && cp icon-192.png icon-512.png sw.js dist/",
     "preview": "vite preview"
   },
   "dependencies": {

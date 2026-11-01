@@ -1,9 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
-import { Book, Plant, dayIndex, memberName, moneyPlant, tipsFor, waterPlant } from './logic';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Book, Plant, QuickPick, catOf, dayIndex, fmtMoney, memberName, moneyPlant, quickPicks, tipsFor, today, uid, waterPlant } from './logic';
+import { methodFor } from './forms';
+import { chime, coin, setSoundOn, soundOn, tick, water as pour } from './sounds';
+import { enableReminders, remindBlocked, remindOn, remindSupported } from './reminders';
 import { store } from './store';
 
 // The welcome moment shown each time the app opens: a greeting, a money plant that grows with savings
-// (watered once a day for a streak), and a saving tip of the day.
+// (watered once a day for a streak), one-tap logging of frequent spends, and a saving tip of the day.
 
 const greet = () => { const h = new Date().getHours(); return h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
 const LEAVES = [0, 2, 4, 6, 8, 10];
@@ -89,34 +92,65 @@ function useConfetti() {
   return { ref, fire };
 }
 
-export function Welcome({ book, name, onDone }: { book: Book; name: string; onDone: () => void }) {
+const STAGE_KEY = 'gwj-stage';
+const STAGE_TEXT = ['', 'Your seed has sprouted!', 'Your money plant is growing!', 'Your money plant is leafy now!', 'Your money plant is flowering!', 'It is a money tree!'];
+
+export function Welcome({ book, name, onDone, onVoice }: { book: Book; name: string; onDone: () => void; onVoice: () => void }) {
   const plant = useMemo(() => moneyPlant(book), [book]);
   const tips = useMemo(() => tipsFor(book), [book]);
+  const picks = useMemo(() => quickPicks(book, 12).filter(p => p.count >= 3 && p.amount <= 2000).slice(0, 6), [book]); // small, frequent spends only: no accidental one-tap rent
   const [i, setI] = useState(() => dayIndex(tipsFor(book).length));
   const [watering, setWatering] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [poke, setPoke] = useState(0);
+  const [logged, setLogged] = useState<{ id: string; text: string } | null>(null);
+  const [levelUp, setLevelUp] = useState(0);
+  const [how, setHow] = useState(false);
+  const [sound, setSound] = useState(soundOn());
+  const [remind, setRemind] = useState<{ show: boolean; msg: string }>(() => ({ show: remindSupported() && !remindOn() && !remindBlocked(), msg: '' }));
   const { ref, fire } = useConfetti();
-  const boxRef = useRef<HTMLDivElement>(null);
   const tip = tips[i % Math.max(1, tips.length)];
   const first = name.trim().split(' ')[0];
   const me = store.session().uid;
   const who = (by?: string) => (by && by === me ? 'you' : memberName(book, by) || 'your family');
+  const center = () => fire(window.innerWidth / 2, window.innerHeight * 0.35, 140);
 
+  // Celebrate when the plant has grown to a new stage since it was last seen on this phone.
+  useEffect(() => {
+    const key = STAGE_KEY + ':' + (store.session().ledgerId || 'local');
+    let prev: number | null = null;
+    try { const v = localStorage.getItem(key); prev = v === null ? null : Number(v); localStorage.setItem(key, String(plant.stage)); } catch { /* storage blocked */ }
+    if (prev !== null && plant.stage > prev) { const t = window.setTimeout(() => { setLevelUp(plant.stage); center(); chime(); }, 900); return () => window.clearTimeout(t); }
+  }, [plant.stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const water = (e: React.MouseEvent) => {
     if (plant.wateredToday || watering) return;
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setWatering(true);
+    setWatering(true); pour();
     try { navigator.vibrate?.(15); } catch { /* not supported */ }
-    window.setTimeout(() => { store.set(waterPlant(store.get())); fire(r.left + r.width / 2, r.top - 120, 110); }, 900);
+    window.setTimeout(() => { store.set(waterPlant(store.get(), me || undefined)); fire(r.left + r.width / 2, r.top - 120, 110); chime(); }, 900);
     window.setTimeout(() => setWatering(false), 1700);
   };
+  const log = (p: QuickPick, e: React.MouseEvent) => {
+    const b = store.get();
+    const accountId = b.accounts.some(a => a.id === p.accountId) ? p.accountId : b.accounts[0]?.id;
+    if (!accountId) return;
+    const id = uid();
+    store.set({ ...b, txs: [...b.txs, { id, date: today(), accountId, type: 'expense', method: methodFor(b, accountId), description: p.description, categoryId: p.categoryId, amount: p.amount, createdAt: Date.now() }] });
+    setLogged({ id, text: `Logged ${fmtMoney(p.amount)} ${p.description}` });
+    setPoke(n => n + 1); coin();
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); fire(r.left + r.width / 2, r.top, 26);
+    try { navigator.vibrate?.(12); } catch { /* not supported */ }
+  };
+  const undo = () => { if (!logged) return; const b = store.get(); store.set({ ...b, txs: b.txs.filter(t => t.id !== logged.id) }); setLogged(null); };
   const close = () => { setLeaving(true); window.setTimeout(onDone, 380); };
+  const wateredLabel = plant.wateredBy && plant.wateredBy !== me ? `Watered today by ${who(plant.wateredBy)} ✓` : 'Watered today ✓ See you tomorrow';
 
   return (
     <div className={'welcome' + (leaving ? ' out' : '')} role="dialog" aria-label="Welcome">
       <canvas ref={ref} className="wl-confetti" aria-hidden="true" />
       <header className="wl-head">
+        <button className="wl-sound" onClick={() => { const v = !sound; setSoundOn(v); setSound(v); if (v) tick(); }} aria-label={sound ? 'Turn sounds off' : 'Turn sounds on'}>{sound ? '🔊' : '🔇'}</button>
         <p className="wl-hello">{greet()}{first ? ',' : ''}</p>
         {first && <h1>{first}</h1>}
       </header>
@@ -126,25 +160,53 @@ export function Welcome({ book, name, onDone }: { book: Book; name: string; onDo
           <svg viewBox="0 0 64 48"><path d="M10 14 h28 a4 4 0 0 1 4 4 v20 a4 4 0 0 1 -4 4 h-28 a4 4 0 0 1 -4 -4 v-20 a4 4 0 0 1 4 -4z" fill="#6E9BFF" /><path d="M42 22 L60 10 L62 13 L44 28 Z" fill="#6E9BFF" /><path d="M14 14 q10 -14 22 0" stroke="#6E9BFF" strokeWidth="4" fill="none" /></svg>
           <i /><i /><i /><i />
         </div>
-        <PlantArt plant={plant} watering={watering} />
+        <div key={poke} className={poke ? 'wl-wiggle' : ''}><PlantArt plant={plant} watering={watering} /></div>
         <div className="wl-plant-info">
           <span className="wl-chip">{plant.name}{plant.income > 0 ? ` · ${Math.round(plant.rate * 100)}% saved` : ''}</span>
           {plant.streak > 0 && <span className="wl-chip streak">🔥 {plant.streak}-day streak</span>}
         </div>
-        <p className="wl-next">{plant.next}</p>
+        <p className="wl-next">{plant.next} <button className="wl-how" onClick={() => setHow(!how)}>{how ? 'Hide' : 'How it grows'}</button></p>
+        {how && <p className="wl-how-text">Your plant grows with the share of this cycle's income you save. Entries of type Savings count, and so do transfers into an account marked "This is a savings account" (Accounts → edit). Water it once a day to keep your streak. Each streak day adds a leaf, up to 4.</p>}
         <button className={'wl-water' + (plant.wateredToday ? ' done' : '')} onClick={water} disabled={plant.wateredToday || watering}>
-          {plant.wateredToday ? 'Watered today ✓ See you tomorrow' : watering ? 'Watering…' : '💧 Water your money plant'}
+          {plant.wateredToday ? wateredLabel : watering ? 'Watering…' : '💧 Water your money plant'}
         </button>
       </section>
 
-      <div className="wl-tip" ref={boxRef}>
+      <section className="wl-log">
+        <div className="wl-log-head"><span className="wl-tag green">Spent something today?</span><button className="wl-mic" onClick={onVoice} aria-label="Say an expense">🎙 Say it</button></div>
+        {picks.length ? <div className="wl-picks">{picks.map(p => { const c = catOf(book, p.categoryId); return (
+          <button key={p.description} className="wl-pick" onClick={e => log(p, e)}><span>{c.icon}</span>{p.description}<b>{fmtMoney(p.amount)}</b></button>); })}</div>
+          : <p className="wl-sub">Tap 🎙 and say it, like "tea 20 rupees". Your frequent spends will appear here for one-tap logging.</p>}
+        {logged && <div className="wl-logged" role="status"><span>✓ {logged.text}</span><button onClick={undo}>Undo</button></div>}
+      </section>
+
+      {remind.show && (
+        <div className="wl-remind">
+          <span>🔔</span>
+          <p><b>Daily nudge</b>{remind.msg || 'A different reminder each day to water your plant and log your spends.'}</p>
+          <button onClick={async () => { const r = await enableReminders(); setRemind({ show: !r.ok, msg: r.text }); if (r.ok) coin(); }}>Turn on</button>
+        </div>
+      )}
+
+      <div className="wl-tip">
         <span className="wl-tag">💡 Saving tip of the day</span>
         {tip && <p className="wl-tip-text" key={i}>{tip.text}</p>}
         {tip && <span className="wl-tip-by">{tip.own ? `Added by ${who(tip.by)}` : 'From Grow with Jana'}</span>}
-        {tips.length > 1 && <div className="wl-add-row"><button className="wl-ghost" onClick={() => setI((i + 1) % tips.length)}>Next tip</button></div>}
+        {tips.length > 1 && <div className="wl-add-row"><button className="wl-ghost" onClick={() => { tick(); setI((i + 1) % tips.length); }}>Next tip</button></div>}
       </div>
 
       <button className="wl-go" onClick={close}>Open my ledger</button>
+
+      {levelUp > 0 && (
+        <div className="wl-level" onClick={() => setLevelUp(0)} role="alertdialog" aria-label="Your plant grew">
+          <div className="wl-level-card">
+            <span className="wl-tag">Level up · {plant.name}</span>
+            <h2>{STAGE_TEXT[levelUp]}</h2>
+            <p>You have saved {fmtMoney(plant.saved)} this cycle, {Math.round(plant.rate * 100)}% of what came in.</p>
+            <button className="wl-water">Keep growing 🌱</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
